@@ -17,60 +17,60 @@ Do not claim statd wins merely because it is written in C.
 
 ## Workloads
 
-Representative registration counts should include at least:
-- 1 runtime;
-- 10 runtimes;
-- 50 runtimes;
-- 100 runtimes when the test host can support them fairly.
-
-Client counts should include at least 1 and multiple concurrent snapshot consumers where applicable.
-
-Sampling freshness/interval must be held comparable across implementations.
+Representative registration counts should include at least 1, 10, and 50 runtimes. Test 100 only when the host can support it fairly. Client counts should include one and multiple consumers when relevant. Hold sampling freshness comparable.
 
 ## Metrics
 
-Record where possible:
-- snapshot request p50/p95/p99 latency;
-- sampler CPU consumption;
-- daemon RSS;
-- Docker daemon CPU for Docker-based comparison;
-- processes spawned per second;
-- syscalls/context switches where tooling is available;
-- metric age at response time;
-- error rate;
-- behavior during cgroup deletion/replacement.
+Record where practical:
+- request p50/p95/p99 latency;
+- statd daemon CPU consumption and RSS;
+- Docker CLI child CPU;
+- Docker daemon CPU/RSS when its PID is supplied;
+- processes spawned per recorded request;
+- process context-switch deltas when available;
+- metric age/freshness only when the protocol provides enough information to measure it honestly;
+- error behavior during runtime replacement/disappearance.
 
 ## Method
 
 - document CPU/kernel/compiler/build flags;
-- use release-like `-O2` for throughput/latency comparisons, not sanitizer builds;
-- run warmup before recorded samples where appropriate;
-- use enough iterations to make percentile claims meaningful;
-- repeat runs and report variance rather than a single lucky number;
-- retain raw output or machine-readable summaries when adding public claims.
+- use release-like `-O2` for comparisons;
+- warm up before recorded samples;
+- collect enough iterations for percentile claims;
+- repeat trials and retain machine-readable output;
+- do not compare results from materially different host load/freshness settings.
 
 ## Phase 4 host harness
 
-`benchmarks/compare.py` compares the simplest production-relevant single-runtime paths:
+For one runtime:
 
 ```bash
+container=my-running-container
+container_pid="$(docker inspect --format '{{.State.Pid}}' "$container")"
+statd_pid="$(pidof mypaas-statd)"
+dockerd_pid="$(pidof dockerd)"
+
 python3 benchmarks/compare.py \
-  --container my-running-container \
+  --container "$container" \
   --runtime-id 11111111-2222-3333-4444-555555555555:app \
-  --pid 12345 \
+  --pid "$container_pid" \
+  --statd-pid "$statd_pid" \
+  --docker-daemon-pid "$dockerd_pid" \
   --iterations 500
 ```
 
-The harness deliberately measures:
+The harness compares:
 - `docker stats --no-stream` as the existing CLI-style baseline;
-- the current MyPaaS statd client model: Unix connect + `hello` + `snapshot` per sample.
+- the current production statd client model: Unix connect + hello + cached snapshot.
 
-It prints machine-readable JSON with min/mean/p50/p95/p99/max latency. Run it repeatedly on the same real MyPaaS host. Do not commit a performance claim from GitHub Actions or a development laptop unless that environment is explicitly the target being claimed.
+Output includes latency distribution, measured Docker CLI process spawns, Docker CLI child CPU, and optional statd/dockerd CPU/RSS/context-switch deltas when their PIDs are supplied.
 
-The harness is syntax-checked by `make test`; the actual performance run is intentionally not a CI gate because shared runners cannot represent the production host fairly.
+The protocol currently does not expose the sampler timestamp. The harness therefore does **not** invent metric-age/freshness numbers; that remains a separate acceptance check until the protocol can support it without widening scope purely for benchmarking.
+
+`make test-benchmark-harness` syntax-checks and unit-tests the helper logic. Real performance execution is intentionally not a CI gate because shared runners do not represent the production MyPaaS host.
 
 ## Acceptance philosophy
 
-If an optimized Go implementation is nearly as efficient and substantially simpler operationally, choose the simpler architecture. statd should exist because measured system behavior and capability justify the extra native daemon, not because C is aesthetically preferred.
+If optimized Go is nearly as efficient and substantially simpler operationally, choose the simpler architecture. statd exists only if measured system behavior/capability justifies the native daemon.
 
-Phase 4 must remain **in progress** until a real host benchmark is recorded. Adding the benchmark harness is not evidence by itself.
+Phase 4 remains **in progress** until a real target-host benchmark is recorded and Compose normal-path telemetry no longer requires Docker process discovery on every refresh.
