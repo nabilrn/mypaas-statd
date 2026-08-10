@@ -8,6 +8,52 @@ Persistent engineering contract for AI agents and contributors. Keep this file c
 
 This project is not a general monitoring agent and not a container runtime.
 
+## Phase discipline
+
+Read `docs/PHASES.md` before implementation work.
+
+- Identify the active phase before coding.
+- Implement only what is required by the current phase and its exit criteria.
+- Do not pull later-phase mechanisms into the current phase for speculative reuse.
+- Do not create abstractions for features that do not exist yet.
+- Complete correctness, tests, and quality gates for the current phase before expanding scope.
+- If a later-phase feature appears necessary to finish the current phase, document why before introducing it.
+
+## Simplicity and maturity rule
+
+The preferred implementation is the simplest mature design that satisfies the documented contract correctly and measurably.
+
+"Low-level" does not mean "maximum complexity". This project values boring, explicit, maintainable systems code.
+
+Prefer:
+- standard Linux/POSIX interfaces with stable semantics;
+- small modules with one clear responsibility;
+- direct control flow over framework-like abstraction;
+- plain structs and explicit functions over generic object systems;
+- fixed/documented bounds where the workload is naturally bounded;
+- straightforward parsing and state machines that are easy to test;
+- code that a competent C/Linux engineer can understand without reconstructing hidden machinery.
+
+Avoid unless current requirements and measurements justify them:
+- generic containers/frameworks built inside the project;
+- macro metaprogramming beyond small compile-time helpers;
+- callback layers that obscure ownership or control flow;
+- premature plugin architectures;
+- unnecessary indirection, inheritance-like patterns, or generic dispatch;
+- clever bit tricks when ordinary arithmetic is clear enough;
+- custom memory allocators;
+- lock-free structures;
+- shared memory;
+- io_uring;
+- eBPF;
+- SIMD/manual assembly;
+- thread pools;
+- caches without a demonstrated repeated cost.
+
+A little duplication is preferable to a premature abstraction when the abstraction would make ownership, error handling, or kernel semantics harder to understand. Refactor only after a real repeated pattern is visible and the simpler API is clear.
+
+Do not optimize for minimum line count. Optimize for correctness, bounded behavior, readability, and measured runtime cost.
+
 ## Locked decisions
 
 - Language: C17.
@@ -99,6 +145,8 @@ Optimization order:
 
 Do not introduce shared memory, io_uring, eBPF, custom allocators, SIMD, or lock-free structures merely because they sound low-latency.
 
+When two implementations meet the requirement and their measured difference is operationally insignificant, choose the simpler implementation.
+
 No README or code comment may claim a speedup versus Docker/Go without reproducible benchmark evidence.
 
 ## Error model
@@ -142,7 +190,7 @@ Release optimization defaults to `-O2`. Do not use `-Ofast` by default.
 ```text
 src/             production implementation
 include/         public/internal project headers
- tests/          unit/integration tests
+tests/           unit/integration tests
 fixtures/        deterministic kernel-file fixtures
 benchmarks/      benchmark programs/scripts and results methodology
 docs/            architecture and stable project contracts
@@ -154,6 +202,7 @@ Keep modules narrow. Do not create generic utility dumping grounds.
 ## Documentation precedence
 
 - `AGENTS.md`: engineering constitution and scope.
+- `docs/PHASES.md`: implementation order and exit criteria.
 - `docs/ARCHITECTURE.md`: component boundaries and data flow.
 - `docs/CGROUP_V2.md`: exact metric semantics and parser contracts.
 - `docs/IPC_PROTOCOL.md`: wire contract.
