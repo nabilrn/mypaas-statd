@@ -1,128 +1,51 @@
 # MyPaaS statd — Development Phases
 
-This document defines the implementation order and exit criteria for `mypaas-statd`.
-
-The phases are intentionally incremental. Do not pull work from a later phase into the current phase merely because it appears useful or technically interesting. Finish the current contract, validate it, then advance.
+Development is incremental: implementation, tests, sanitizers, static analysis, then remote CI gate before advancing.
 
 ## Testing and phase-gate policy
 
-Every implementation phase must ship its tests with the production change. Testing is part of the phase, not follow-up cleanup.
+- every phase adds/updates its test target;
+- `make test` retains all completed phase regression tests;
+- GitHub Actions validates GCC, Clang, ASan/UBSan, and clang-tidy;
+- registry publishing stays deferred until v0.1 is hardened.
 
-Rules:
-- each phase adds a dedicated `make test-phaseN` target;
-- `make test` aggregates the smoke test plus every completed phase target;
-- tests for a phase cover documented success, boundary, malformed-input, and failure cases before completion;
-- deterministic tests are preferred; live-host tests are supplementary;
-- every completed phase remains covered by later CI runs;
-- GitHub Actions runs GCC and Clang tests, ASan/UBSan, and static analysis;
-- a phase is complete only after the corresponding remote CI run is green;
-- later bugs receive the smallest regression test at the phase/layer where they should have been caught.
-
-Registry publishing and release packaging remain deferred until the implementation phases are complete and v0.1 behavior is validated.
-
-## Phase 0 — Foundation and engineering contracts
-
-**Goal:** establish a safe, boring, reproducible C project before kernel-facing implementation begins.
-
+## Phase 0 — Foundation
 **Status:** complete.
 
 ## Phase 1 — Pure cgroup v2 parsers
-
-**Goal:** correctly parse all v0.1 kernel text formats without requiring a live cgroup filesystem.
-
-**Status:** complete. GCC, Clang, ASan/UBSan, and clang-tidy gates passed for the Phase 1 implementation.
+**Status:** complete; remote gates green.
 
 ## Phase 2 — cgroup reader and monotonic sampler
-
-**Goal:** turn validated parsers into a small, correct sampler for explicitly registered cgroup paths.
-
-Implemented scope:
-- safe relative path traversal beneath configured cgroup root;
-- fixed 4096-byte controller reads;
-- `CLOCK_MONOTONIC` sampling state;
-- CPU delta/reset handling;
-- memory/PID snapshots and unlimited limits;
-- latest-good snapshot storage plus last sample status;
-- fixed registry bounds.
-
-**Status:** complete. GCC, Clang, ASan/UBSan, and clang-tidy gates passed for the Phase 2 implementation.
+**Status:** complete; remote gates green.
 
 ## Phase 3 — Unix socket protocol v1
+**Status:** complete; GCC, Clang, ASan/UBSan, and clang-tidy gates passed.
 
-**Goal:** expose latest snapshots safely to the local MyPaaS control plane.
-
-Implemented scope:
-- AF_UNIX + SOCK_STREAM pathname server;
-- nonblocking fixed-slot `poll()` loop;
-- hello/protocol negotiation;
-- register, unregister, snapshot, and status operations;
-- 8 KiB input and 4 KiB output bounds per client;
-- partial reads/writes and multiple messages per stream;
-- malformed/oversized/disconnected client isolation;
-- socket mode `0600` and cleanup;
-- daemon runtime loop with independent periodic sampling.
-
-Constraints retained:
-- no epoll because eight clients do not justify it;
-- no threads;
-- no HTTP/gRPC/protobuf/shared memory;
-- snapshot requests never trigger a full metrics sweep.
-
-**Status:** complete. GCC, Clang, ASan/UBSan, and clang-tidy gates passed for the Phase 3 implementation and protocol integration tests.
+Implemented: fixed-slot nonblocking `poll()` server, hello, register/unregister/snapshot/status, bounded stream handling, socket permissions/cleanup, and independent periodic sampling.
 
 ## Phase 4 — MyPaaS integration and baseline comparison
 
-**Goal:** prove that statd is operationally useful before broadening its scope.
+**Status:** in progress.
 
-Scope:
-- Go-side client in MyPaaS;
-- registration lifecycle integration;
-- fallback/error behavior;
-- benchmark current Docker CLI metrics path versus optimized Go/runtime path versus statd where practical;
-- operational systemd service/release packaging, but no registry publishing yet.
+Integration boundary established:
+- MyPaaS obtains a container host PID once during runtime lifecycle transitions;
+- production IPC register sends that PID to statd;
+- statd resolves cgroup v2 membership from `/proc/<pid>/cgroup` using the documented `0::$PATH` entry;
+- statd still never talks to Docker or guesses Docker/systemd cgroup layout;
+- direct relative-cgroup registration remains available only for deterministic tests/admin diagnostics.
 
-Exit criteria:
-- end-to-end metrics appear correctly in MyPaaS;
-- lifecycle does not leak registrations;
-- restart/reconnect behavior is tested;
-- integration tests cover Go ↔ statd contract and failures;
-- benchmark records CPU, RSS, latency, syscall/process cost, and freshness;
-- statd provides meaningful measured benefit or integration is reconsidered;
-- GitHub Actions green for integration changes.
-
-**Status:** in progress. First slice is the tested Go protocol client on an isolated MyPaaS branch before wiring deployment lifecycle or replacing the Docker fallback path.
+Remaining Phase 4 scope:
+- tested Go protocol client on an isolated MyPaaS integration slice;
+- Docker lifecycle PID discovery helpers;
+- register/unregister/reconcile integration;
+- metrics read path with explicit Docker fallback;
+- end-to-end tests;
+- benchmark baseline and systemd packaging.
 
 ## Phase 5 — Mature v0.1 hardening
 
-**Goal:** make the proven design boring to operate.
-
-Scope only as evidence requires:
-- repeated-failure suppression/rate-limited logs;
-- resource/FD leak tests;
-- long-running soak test;
-- packaging checks;
-- compatibility documentation;
-- benchmark-supported small performance improvements.
-
-Exit criteria:
-- long-running test shows bounded memory/FD behavior;
-- graceful shutdown/restart is reliable;
-- documentation matches implementation;
-- all completed phase test targets remain green;
-- v0.1 release artifacts are reproducible.
-
-## Post-v0.1 ideas — not commitments
-
-Potential later work includes IO metrics, PSI, OOM notifications, health probing, event-driven lifecycle integration, or other kernel interfaces. Each requires a separate need, contract, and benchmark. Do not pre-build abstractions for hypothetical future modules.
+Pending until Phase 4 proves operational value. Registry/release publishing remains deferred.
 
 ## Phase discipline
 
-For every task:
-1. identify the active phase;
-2. implement the smallest change needed for that phase;
-3. write/update phase tests in the same change;
-4. do not create abstractions solely for future phases;
-5. satisfy current exit criteria;
-6. require green CI before marking complete;
-7. benchmark only performance claims;
-8. prefer deleting unnecessary complexity over hypothetical reuse.
+Prefer the smallest mature implementation that satisfies the current phase. Do not build future mechanisms early.

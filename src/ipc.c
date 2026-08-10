@@ -1,4 +1,5 @@
 #include "ipc.h"
+#include "proc_cgroup.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -28,6 +29,8 @@ struct request {
     char id[STATD_RUNTIME_ID_MAX + 1U];
     bool has_cgroup;
     char cgroup[STATD_CGROUP_PATH_MAX + 1U];
+    bool has_pid;
+    uint64_t pid;
 };
 
 static bool ascii_space(char ch)
@@ -117,6 +120,7 @@ static bool parse_request(const char *input, size_t len, struct request *out)
     bool has_protocol = false;
     bool has_id = false;
     bool has_cgroup = false;
+    bool has_pid = false;
     char op_value[16];
     struct request parsed = {0};
 
@@ -174,6 +178,12 @@ static bool parse_request(const char *input, size_t len, struct request *out)
             }
             parsed.has_cgroup = true;
             has_cgroup = true;
+        } else if (strcmp(key, "pid") == 0) {
+            if (has_pid || !parse_u64_json(input, len, &offset, &parsed.pid) || parsed.pid == 0U) {
+                return false;
+            }
+            parsed.has_pid = true;
+            has_pid = true;
         } else {
             return false;
         }
@@ -352,13 +362,30 @@ static void handle_request(struct statd_ipc_server *server, struct statd_ipc_cli
         return;
     }
     if (request.operation == REQUEST_REGISTER) {
+        char resolved_cgroup[STATD_CGROUP_PATH_MAX + 1U];
+        const char *cgroup = request.cgroup;
         struct statd_snapshot ignored = {0};
         enum statd_sampler_status status = STATD_SAMPLER_OK;
-        if (!request.has_cgroup) {
+
+        if (request.has_pid == request.has_cgroup) {
             queue_error(client, "INVALID_REQUEST", false);
             return;
         }
-        status = statd_registry_register(server->registry, request.id, request.cgroup);
+        if (request.has_pid) {
+            const enum statd_proc_cgroup_status proc_status =
+                statd_proc_cgroup_from_pid(request.pid, resolved_cgroup, sizeof(resolved_cgroup));
+            if (proc_status == STATD_PROC_CGROUP_NOT_FOUND) {
+                queue_error(client, "CGROUP_NOT_FOUND", false);
+                return;
+            }
+            if (proc_status != STATD_PROC_CGROUP_OK) {
+                queue_error(client, "CGROUP_RESOLVE_FAILED", false);
+                return;
+            }
+            cgroup = resolved_cgroup;
+        }
+
+        status = statd_registry_register(server->registry, request.id, cgroup);
         if (status == STATD_SAMPLER_LIMIT) {
             queue_error(client, "REGISTRATION_LIMIT", false);
             return;

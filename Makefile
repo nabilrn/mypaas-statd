@@ -6,13 +6,14 @@ LDFLAGS ?=
 LDLIBS ?=
 
 BIN := build/mypaas-statd
-PROD_SRC := src/main.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c src/ipc.c
+PROD_SRC := src/main.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c src/proc_cgroup.c src/ipc.c
 SMOKE_BIN := build/test_smoke
 PHASE1_TEST_BIN := build/test_cgroup_parse
 PHASE2_TEST_BIN := build/test_sampler
 PHASE3_TEST_BIN := build/test_ipc
+PHASE4_TEST_BIN := build/test_proc_cgroup
 
-.PHONY: all clean test test-phase1 test-phase2 test-phase3 sanitize lint format verify
+.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 sanitize lint format verify
 
 all: $(BIN)
 
@@ -33,12 +34,15 @@ $(PHASE2_TEST_BIN): tests/test_sampler.c src/cgroup_parse.c src/cgroup_reader.c 
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_sampler.c src/cgroup_parse.c \
 		src/cgroup_reader.c src/sampler.c -lm -o $@
 
-$(PHASE3_TEST_BIN): tests/test_ipc.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c src/ipc.c \
-		include/cgroup_parse.h include/cgroup_reader.h include/sampler.h include/ipc.h | build
+$(PHASE3_TEST_BIN): tests/test_ipc.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c src/proc_cgroup.c src/ipc.c \
+		include/cgroup_parse.h include/cgroup_reader.h include/sampler.h include/proc_cgroup.h include/ipc.h | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_ipc.c src/cgroup_parse.c \
-		src/cgroup_reader.c src/sampler.c src/ipc.c -lm -o $@
+		src/cgroup_reader.c src/sampler.c src/proc_cgroup.c src/ipc.c -lm -o $@
 
-test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3
+$(PHASE4_TEST_BIN): tests/test_proc_cgroup.c src/proc_cgroup.c include/proc_cgroup.h | build
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_proc_cgroup.c src/proc_cgroup.c -o $@
+
+test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4
 	./$(SMOKE_BIN)
 
 test-phase1: $(PHASE1_TEST_BIN)
@@ -49,6 +53,9 @@ test-phase2: $(PHASE2_TEST_BIN)
 
 test-phase3: $(PHASE3_TEST_BIN)
 	./$(PHASE3_TEST_BIN)
+
+test-phase4: $(PHASE4_TEST_BIN)
+	./$(PHASE4_TEST_BIN)
 
 sanitize: | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
@@ -63,11 +70,15 @@ sanitize: | build
 		src/sampler.c -lm -o build/test-sampler-sanitize
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
 		-fsanitize=address,undefined tests/test_ipc.c src/cgroup_parse.c src/cgroup_reader.c \
-		src/sampler.c src/ipc.c -lm -o build/test-ipc-sanitize
+		src/sampler.c src/proc_cgroup.c src/ipc.c -lm -o build/test-ipc-sanitize
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
+		-fsanitize=address,undefined tests/test_proc_cgroup.c src/proc_cgroup.c \
+		-o build/test-proc-cgroup-sanitize
 	./build/test-smoke-sanitize
 	./build/test-cgroup-parse-sanitize
 	./build/test-sampler-sanitize
 	./build/test-ipc-sanitize
+	./build/test-proc-cgroup-sanitize
 
 lint:
 	@command -v clang-tidy >/dev/null 2>&1 || { echo "clang-tidy not installed"; exit 1; }
