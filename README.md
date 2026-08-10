@@ -8,7 +8,9 @@ Its job is intentionally narrow: sample cgroup v2 runtime counters with low over
 
 Phases 0–3 are complete and CI-gated. Phase 4 integration is implemented through the MyPaaS statd client branch, host PID-based cgroup resolution, optional production socket wiring, systemd packaging, and a real-host benchmark harness.
 
-Phase 4 is **not considered complete yet** because the performance acceptance gate requires benchmark evidence from the actual MyPaaS VM. GitHub Actions validates correctness and build hygiene; it is not used to manufacture production latency claims.
+The Phase 4 **real-host performance gate is accepted** based on preserved Debian 13 + Podman evidence from 3 comparable trials × 500 recorded iterations. The tested Docker-compatible CLI path averaged about 43.03 ms per request across the three trials, while the statd socket path averaged about 0.83 ms, with 500 measured CLI process spawns per trial versus 0 client process spawns for statd. Correctness checks also compared statd output against raw cgroup v2 counters and exercised runtime disappearance without crashing the daemon.
+
+The raw evidence is preserved under `benchmarks/results/phase4-debian13-podman-2026-08-10/`. Phase 4 overall still requires the MyPaaS integration branch to be synchronized, reviewed, merged, and exercised end-to-end before production rollout is considered complete.
 
 ## v0.1 scope
 
