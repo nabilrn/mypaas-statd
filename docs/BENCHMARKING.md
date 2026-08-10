@@ -49,6 +49,28 @@ Record where possible:
 - repeat runs and report variance rather than a single lucky number;
 - retain raw output or machine-readable summaries when adding public claims.
 
+## Phase 4 host harness
+
+`benchmarks/compare.py` compares the simplest production-relevant single-runtime paths:
+
+```bash
+python3 benchmarks/compare.py \
+  --container my-running-container \
+  --runtime-id 11111111-2222-3333-4444-555555555555:app \
+  --pid 12345 \
+  --iterations 500
+```
+
+The harness deliberately measures:
+- `docker stats --no-stream` as the existing CLI-style baseline;
+- the current MyPaaS statd client model: Unix connect + `hello` + `snapshot` per sample.
+
+It prints machine-readable JSON with min/mean/p50/p95/p99/max latency. Run it repeatedly on the same real MyPaaS host. Do not commit a performance claim from GitHub Actions or a development laptop unless that environment is explicitly the target being claimed.
+
+The harness is syntax-checked by `make test`; the actual performance run is intentionally not a CI gate because shared runners cannot represent the production host fairly.
+
 ## Acceptance philosophy
 
 If an optimized Go implementation is nearly as efficient and substantially simpler operationally, choose the simpler architecture. statd should exist because measured system behavior and capability justify the extra native daemon, not because C is aesthetically preferred.
+
+Phase 4 must remain **in progress** until a real host benchmark is recorded. Adding the benchmark harness is not evidence by itself.
