@@ -16,7 +16,7 @@ PHASE2_TEST_BIN := build/test_sampler
 PHASE3_TEST_BIN := build/test_ipc
 PHASE4_TEST_BIN := build/test_proc_cgroup
 
-.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-packaging sanitize lint format verify install
+.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-packaging test-benchmark-harness sanitize lint format verify install
 
 all: $(BIN)
 
@@ -45,7 +45,7 @@ $(PHASE3_TEST_BIN): tests/test_ipc.c src/cgroup_parse.c src/cgroup_reader.c src/
 $(PHASE4_TEST_BIN): tests/test_proc_cgroup.c src/proc_cgroup.c include/proc_cgroup.h | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_proc_cgroup.c src/proc_cgroup.c -o $@
 
-test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-packaging
+test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-packaging test-benchmark-harness
 	./$(SMOKE_BIN)
 
 test-phase1: $(PHASE1_TEST_BIN)
@@ -62,6 +62,9 @@ test-phase4: $(PHASE4_TEST_BIN)
 
 test-packaging: all
 	bash tests/test_packaging.sh
+
+test-benchmark-harness:
+	python3 -m py_compile benchmarks/compare.py
 
 install: all
 	$(INSTALL) -Dm0755 $(BIN) $(DESTDIR)$(PREFIX)/bin/mypaas-statd
