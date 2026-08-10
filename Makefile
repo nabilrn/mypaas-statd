@@ -4,6 +4,9 @@ BASE_CFLAGS := -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wformat=
 CFLAGS ?= -O2
 LDFLAGS ?=
 LDLIBS ?=
+PREFIX ?= /usr/local
+SYSTEMD_UNIT_DIR ?= $(PREFIX)/lib/systemd/system
+INSTALL ?= install
 
 BIN := build/mypaas-statd
 PROD_SRC := src/main.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c src/proc_cgroup.c src/ipc.c
@@ -13,7 +16,7 @@ PHASE2_TEST_BIN := build/test_sampler
 PHASE3_TEST_BIN := build/test_ipc
 PHASE4_TEST_BIN := build/test_proc_cgroup
 
-.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 sanitize lint format verify
+.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-packaging sanitize lint format verify install
 
 all: $(BIN)
 
@@ -42,7 +45,7 @@ $(PHASE3_TEST_BIN): tests/test_ipc.c src/cgroup_parse.c src/cgroup_reader.c src/
 $(PHASE4_TEST_BIN): tests/test_proc_cgroup.c src/proc_cgroup.c include/proc_cgroup.h | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_proc_cgroup.c src/proc_cgroup.c -o $@
 
-test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4
+test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-packaging
 	./$(SMOKE_BIN)
 
 test-phase1: $(PHASE1_TEST_BIN)
@@ -56,6 +59,13 @@ test-phase3: $(PHASE3_TEST_BIN)
 
 test-phase4: $(PHASE4_TEST_BIN)
 	./$(PHASE4_TEST_BIN)
+
+test-packaging: all
+	bash tests/test_packaging.sh
+
+install: all
+	$(INSTALL) -Dm0755 $(BIN) $(DESTDIR)$(PREFIX)/bin/mypaas-statd
+	$(INSTALL) -Dm0644 packaging/mypaas-statd.service $(DESTDIR)$(SYSTEMD_UNIT_DIR)/mypaas-statd.service
 
 sanitize: | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
