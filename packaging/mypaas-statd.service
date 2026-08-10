@@ -1,0 +1,30 @@
+[Unit]
+Description=MyPaaS cgroup v2 telemetry daemon
+Documentation=https://github.com/nabilrn/mypaas-statd
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mypaas-statd
+Restart=on-failure
+RestartSec=2s
+RuntimeDirectory=mypaas
+RuntimeDirectoryMode=0750
+Environment=MYPAAS_STATD_CGROUP_ROOT=/sys/fs/cgroup
+Environment=MYPAAS_STATD_SOCKET=/run/mypaas/statd.sock
+
+# The daemon needs read access to host /proc/<pid>/cgroup and cgroup v2, but
+# does not need to mutate kernel control groups or host files.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
