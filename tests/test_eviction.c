@@ -66,7 +66,6 @@ int main(void)
     CHECK(statd_registry_latest(&registry, "runtime-1", &snapshot) == STATD_SAMPLER_NOT_FOUND);
 
     statd_registry_destroy(&registry);
-    unlink("/tmp/unused");
 
     {
         static const char *files[] = {"cpu.max",       "memory.current", "memory.max",
