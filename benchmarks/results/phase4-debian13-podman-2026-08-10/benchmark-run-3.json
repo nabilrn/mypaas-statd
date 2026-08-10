@@ -1,0 +1,53 @@
+{
+  "configuration": {
+    "container": "statd-bench",
+    "docker_daemon_pid": null,
+    "iterations": 500,
+    "runtime_id": "phase4:bench-trial-3",
+    "statd_pid": 4733,
+    "warmup": 50
+  },
+  "docker_cli": {
+    "cli_child_cpu_seconds": 19.956553,
+    "latency": {
+      "max_ms": 68.152107,
+      "mean_ms": 43.954954898000004,
+      "min_ms": 31.976639,
+      "p50_ms": 43.2664495,
+      "p95_ms": 55.993713,
+      "p99_ms": 64.04532325,
+      "samples": 500
+    },
+    "measured_process_spawns": 500,
+    "wall_seconds": 21.978995991
+  },
+  "notes": [
+    "Recorded Docker samples spawn one docker CLI process each; warmup spawns are excluded from measured_process_spawns.",
+    "cli_child_cpu_seconds is CPU consumed by benchmark child processes, not dockerd itself.",
+    "Pass --docker-daemon-pid to measure dockerd CPU/RSS/context-switch deltas.",
+    "Pass --statd-pid to measure mypaas-statd CPU/RSS/context-switch deltas.",
+    "statd latency follows the production client model: connect + hello + snapshot per sample.",
+    "Protocol v1 does not expose sampler timestamp, so metric-age/freshness is not fabricated by this harness.",
+    "Run repeated trials on the same target host before making performance claims."
+  ],
+  "statd_socket": {
+    "client_process_spawns": 0,
+    "daemon": {
+      "cpu_seconds": 0.03999999999999998,
+      "involuntary_context_switches": 12,
+      "rss_bytes_after": 1859584,
+      "rss_bytes_before": 1859584,
+      "voluntary_context_switches": 1982
+    },
+    "latency": {
+      "max_ms": 1.544936,
+      "mean_ms": 0.870551032,
+      "min_ms": 0.736107,
+      "p50_ms": 0.820184,
+      "p95_ms": 1.08817145,
+      "p99_ms": 1.2006058099999999,
+      "samples": 500
+    },
+    "wall_seconds": 0.43590697
+  }
+}

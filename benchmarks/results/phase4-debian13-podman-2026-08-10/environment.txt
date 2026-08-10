@@ -1,0 +1,38 @@
+date_utc=2026-08-10T12:12:03+00:00
+statd_commit=cf8843545ea19ecf9a54049e21b2fe609e49d58d
+mypaas_commit=2950dfea9ba6a9c02ba0d25027cc4074fa5f5ce9
+
+os=Debian GNU/Linux 13 (trixie)
+debian_version_full=13.5
+kernel=Linux localhost 6.12.88+deb13-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.88-1 (2026-05-15) x86_64 GNU/Linux
+
+architecture=x86_64
+cpu_count=2
+online_cpus=0,1
+cpu_model=AMD EPYC 7642 48-Core Processor
+hypervisor=KVM
+
+memory_total=3.8Gi
+swap_total=495Mi
+
+cgroup_mount=cgroup2 on /sys/fs/cgroup type cgroup2 (rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot)
+cgroup_fs_type=cgroup2fs
+cgroup_controllers=cpuset cpu io memory hugetlb pids rdma misc
+
+compiler=cc (Debian 14.2.0-19) 14.2.0
+clang_tidy=Debian LLVM version 19.1.7
+
+podman_client=Podman Engine 5.4.2
+podman_api=5.4.2
+podman_go=go1.24.4
+podman_os_arch=linux/amd64
+
+docker_cli_compat=Podman Engine 5.4.2
+docker_cli_compat_api=5.4.2
+docker_socket_compat_path=/var/run/docker.sock -> /run/podman/podman.sock
+podman_socket=/run/podman/podman.sock
+podman_socket_mode=srw-rw---- root root
+
+statd_service=mypaas-statd.service active/running
+statd_socket=/run/mypaas/statd.sock
+statd_socket_mode=0600 root root
