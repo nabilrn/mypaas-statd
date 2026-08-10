@@ -272,7 +272,13 @@ void statd_registry_sample_all(struct statd_registry *registry)
         struct statd_registration *registration = &registry->registrations[index];
         if (registration->used) {
             struct statd_snapshot ignored = {0};
-            (void)statd_registry_sample(registry, registration->id, &ignored);
+            const enum statd_sampler_status status =
+                statd_registry_sample(registry, registration->id, &ignored);
+            if (status == STATD_SAMPLER_NOT_FOUND) {
+                close(registration->cgroup_fd);
+                memset(registration, 0, sizeof(*registration));
+                registry->count--;
+            }
         }
     }
 }
