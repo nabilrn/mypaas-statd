@@ -17,7 +17,7 @@ PHASE3_TEST_BIN := build/test_ipc
 PHASE4_TEST_BIN := build/test_proc_cgroup
 PHASE4_EVICTION_BIN := build/test_eviction
 
-.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-packaging test-benchmark-harness sanitize lint format verify install
+.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-packaging test-benchmark-harness sanitize lint format verify install
 
 all: $(BIN)
 
@@ -51,7 +51,7 @@ $(PHASE4_EVICTION_BIN): tests/test_eviction.c src/cgroup_parse.c src/cgroup_read
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_eviction.c src/cgroup_parse.c \
 		src/cgroup_reader.c src/sampler.c -lm -o $@
 
-test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-packaging test-benchmark-harness
+test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-packaging test-benchmark-harness
 	./$(SMOKE_BIN)
 
 test-phase1: $(PHASE1_TEST_BIN)
@@ -66,6 +66,9 @@ test-phase3: $(PHASE3_TEST_BIN)
 test-phase4: $(PHASE4_TEST_BIN) $(PHASE4_EVICTION_BIN)
 	./$(PHASE4_TEST_BIN)
 	./$(PHASE4_EVICTION_BIN)
+
+test-phase5: all
+	python3 tests/test_phase5_process.py
 
 test-packaging: all
 	bash tests/test_packaging.sh
@@ -98,12 +101,15 @@ sanitize: | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
 		-fsanitize=address,undefined tests/test_eviction.c src/cgroup_parse.c src/cgroup_reader.c \
 		src/sampler.c -lm -o build/test-eviction-sanitize
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
+		-fsanitize=address,undefined $(PROD_SRC) -o build/mypaas-statd
 	./build/test-smoke-sanitize
 	./build/test-cgroup-parse-sanitize
 	./build/test-sampler-sanitize
 	./build/test-ipc-sanitize
 	./build/test-proc-cgroup-sanitize
 	./build/test-eviction-sanitize
+	python3 tests/test_phase5_process.py
 
 lint:
 	@command -v clang-tidy >/dev/null 2>&1 || { echo "clang-tidy not installed"; exit 1; }

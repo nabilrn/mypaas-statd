@@ -95,6 +95,16 @@ python3 benchmarks/compare.py \
 
 Run several times under comparable host load and retain the JSON output. The benchmark harness measures the existing `docker stats --no-stream` style baseline against the current statd client model (Unix connect + hello + snapshot).
 
+## Phase 5 hardening checks
+
+The CI test suite includes a process-level daemon check that starts
+`build/mypaas-statd` against a temporary cgroup fixture and Unix socket. It
+exercises protocol v1 registration/snapshots, repeated short-lived client
+connections, disappeared-cgroup eviction, SIGTERM shutdown, and restart with an
+empty in-memory registry.
+
 ## Current packaging policy
 
-Phase 4 uses source build + systemd installation. GitHub Release binaries and any registry/image publishing are deliberately deferred until v0.1 hardening is complete.
+Phase 5 still uses source build + systemd installation. GitHub Release binaries
+and any registry/image publishing are deliberately deferred until v0.1 hardening
+is complete.
