@@ -35,7 +35,10 @@ The default installation places:
 /run/mypaas/statd.sock
 ```
 
-`/run/mypaas` is created by systemd through `RuntimeDirectory=mypaas`.
+`/run/mypaas` is created by systemd through `RuntimeDirectory=mypaas` and
+preserved across service restarts. This keeps existing MyPaaS API container bind
+mounts pointed at the same host runtime directory when `mypaas-statd` is
+restarted.
 
 ## Verify the daemon
 
