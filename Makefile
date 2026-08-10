@@ -1,5 +1,5 @@
 CC ?= cc
-CPPFLAGS ?= -Iinclude
+CPPFLAGS ?= -D_POSIX_C_SOURCE=200809L -Iinclude
 BASE_CFLAGS := -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wformat=2 -Wundef
 CFLAGS ?= -O2
 LDFLAGS ?=
