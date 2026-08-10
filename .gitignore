@@ -1,0 +1,12 @@
+build/
+*.o
+*.a
+*.so
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+compile_commands.json
+.DS_Store
+.vscode/
+.idea/
