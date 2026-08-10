@@ -4,34 +4,47 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         compiler: [gcc, clang]
     steps:
       - uses: actions/checkout@v4
-      - name: Build and test
+      - name: Build
         env:
           CC: ${{ matrix.compiler }}
         run: |
           make clean
           make
-          make test
+      - name: Run completed phase tests
+        env:
+          CC: ${{ matrix.compiler }}
+        run: make test
 
   sanitizers:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Sanitizer build
+      - name: ASan and UBSan
         env:
           CC: clang
         run: make sanitize
 
-  clang-tidy:
+  static-analysis:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Static analysis
+      - name: Install clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy
+      - name: Run clang-tidy
         run: make lint

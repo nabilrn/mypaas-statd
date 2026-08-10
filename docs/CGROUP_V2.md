@@ -18,7 +18,7 @@ Files targeted for v0.1:
 
 Required CPU-time source: `usage_usec` from `cpu.stat`.
 
-`usage_usec` is a cumulative counter, not a utilization percentage.
+`usage_usec` is a cumulative counter, not a utilization percentage. Other current or future flat-keyed `cpu.stat` fields are not required by v0.1 and may be ignored after the line shape is validated.
 
 For consecutive valid samples:
 
@@ -32,7 +32,7 @@ A workload using two CPUs fully may report near 200% in raw utilization. Do not 
 
 If the cumulative counter decreases or the registration identity is replaced, discard the delta and establish a new baseline.
 
-`cpu.max` contains quota and period. The quota token may be `max`. v0.1 records the limit metadata needed by the MyPaaS metric contract; it must not fabricate a numeric quota for `max`.
+`cpu.max` contains quota and period as two tokens. The quota token may be `max`; `max` means no limit and must remain an explicit state rather than a fabricated integer.
 
 ## Memory
 
@@ -43,9 +43,13 @@ Files:
 
 `memory.current`: current memory usage in bytes.
 
-`memory.max`: memory limit in bytes or literal `max`. Unlimited is represented explicitly.
+`memory.max`: memory hard limit in bytes or literal `max`. Unlimited is represented explicitly.
 
-`memory.events`: keyed cumulative event counters. v0.1 should at least be able to represent OOM-related counters selected during implementation contract finalization. Unknown future keys should not make the parser fail if required keys remain valid.
+`memory.events`: read-only flat-keyed cumulative event counters. The counters are hierarchical for the cgroup subtree. v0.1 records:
+- `oom`: number of times an allocation was about to fail because of memory limit conditions described by the kernel interface;
+- `oom_kill`: number of processes belonging to the cgroup killed by an OOM killer.
+
+Both keys are required for a valid v0.1 `memory.events` sample. Unknown additional keys are ignored so new kernel counters do not break statd. A duplicate required key is treated as malformed input rather than guessed.
 
 ## PIDs
 
@@ -53,9 +57,20 @@ Files:
 - `pids.current`
 - `pids.max`
 
-`pids.current`: current number of processes/tasks accounted by the controller according to kernel semantics.
+`pids.current`: current number accounted by the pids controller for the cgroup and its descendants according to kernel semantics.
 
-`pids.max`: numeric limit or literal `max`.
+`pids.max`: numeric hard limit or literal `max`. Unlimited is represented explicitly.
+
+## Parser contract
+
+Phase 1 parsers:
+- consume explicit `(pointer, length)` input;
+- perform no file I/O and no heap allocation;
+- do not assume NUL termination;
+- use unsigned 64-bit storage for kernel counters/byte values and reject decimal overflow;
+- accept surrounding ASCII whitespace where kernel text interfaces commonly include a trailing newline;
+- reject extra tokens for single/two-value interfaces;
+- distinguish malformed input, missing required keys, and numeric range overflow.
 
 ## Optional future sources
 

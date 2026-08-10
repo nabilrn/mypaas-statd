@@ -4,6 +4,22 @@ This document defines the implementation order and exit criteria for `mypaas-sta
 
 The phases are intentionally incremental. Do not pull work from a later phase into the current phase merely because it appears useful or technically interesting. Finish the current contract, validate it, then advance.
 
+## Testing and phase-gate policy
+
+Every implementation phase must ship its tests with the production change. Testing is part of the phase, not follow-up cleanup.
+
+Rules:
+- each phase adds a dedicated `make test-phaseN` target;
+- `make test` aggregates the smoke test plus every completed phase target;
+- tests for a phase must cover its documented success, boundary, malformed-input, and failure cases before the phase can be marked complete;
+- deterministic tests are preferred; live-host integration tests are supplementary and must not replace parser/state tests;
+- every completed phase must remain covered by later CI runs to prevent regression;
+- GitHub Actions runs the complete test suite with both GCC and Clang, plus ASan/UBSan and static analysis;
+- a phase is not complete until its implementation and tests are pushed and the corresponding CI run is green;
+- when a bug is found later, add the smallest regression test at the phase/layer where the bug should have been caught.
+
+Registry publishing and release packaging are intentionally deferred until the implementation phases are complete and the v0.1 behavior has been validated.
+
 ## Phase 0 — Foundation and engineering contracts
 
 **Goal:** establish a safe, boring, reproducible C project before kernel-facing implementation begins.
@@ -46,10 +62,13 @@ Constraints:
 - malformed required values must fail explicitly.
 
 Exit criteria:
-- fixtures cover valid, malformed, missing-field, overflow/range, whitespace, and `max` cases;
-- parser tests pass under GCC and Clang;
-- ASan/UBSan clean;
-- no live-host dependency in parser tests.
+- fixtures and tests collectively cover valid, malformed, missing-field, overflow/range, whitespace, unknown-key, duplicate-key, and `max` cases;
+- `make test-phase1` passes under GCC and Clang;
+- `make sanitize` exercises Phase 1 parser tests without ASan/UBSan findings;
+- no live-host dependency in parser tests;
+- GitHub Actions is green for the Phase 1 commit.
+
+**Status:** in progress until CI validates the implementation commit.
 
 ## Phase 2 — cgroup reader and monotonic sampler
 
@@ -74,7 +93,9 @@ Constraints:
 Exit criteria:
 - deterministic sampler-state tests cover first sample, subsequent sample, counter regression/reset, zero/short elapsed interval, disappearing cgroup, and unlimited limits;
 - live Linux integration test can sample a controlled cgroup when the environment permits;
-- sanitizer clean.
+- `make test-phase2` is included by `make test`;
+- sanitizer clean;
+- GitHub Actions is green for the Phase 2 commit.
 
 ## Phase 3 — Unix socket protocol v1
 
@@ -96,7 +117,9 @@ Constraints:
 Exit criteria:
 - protocol integration tests cover fragmentation, multiple messages, oversized input, malformed JSON, unsupported version/op, disconnects, and slow/broken clients;
 - daemon remains alive after client protocol errors;
-- socket permissions and cleanup behavior are tested.
+- socket permissions and cleanup behavior are tested;
+- `make test-phase3` is included by `make test`;
+- GitHub Actions is green for the Phase 3 commit.
 
 ## Phase 4 — MyPaaS integration and baseline comparison
 
@@ -113,8 +136,10 @@ Exit criteria:
 - end-to-end metrics appear correctly in MyPaaS;
 - container/project lifecycle does not leak registrations;
 - daemon restart/reconnect behavior is defined and tested;
+- integration tests cover the Go ↔ statd contract and failure/reconnect behavior;
 - benchmark report records CPU, RSS, latency, syscall/process cost, and metric freshness;
-- statd provides a meaningful measured benefit or the integration is reconsidered.
+- statd provides a meaningful measured benefit or the integration is reconsidered;
+- GitHub Actions is green for the Phase 4 integration changes.
 
 ## Phase 5 — Mature v0.1 hardening
 
@@ -132,6 +157,7 @@ Exit criteria:
 - long-running test shows bounded memory/FD behavior;
 - graceful shutdown/restart is reliable;
 - documentation matches implementation;
+- all completed phase test targets remain green;
 - v0.1 release artifacts are reproducible.
 
 ## Post-v0.1 ideas — not commitments
@@ -143,7 +169,9 @@ Potential later work includes IO metrics, PSI, OOM notifications, health probing
 For every task:
 1. identify the active phase;
 2. implement the smallest change needed for that phase;
-3. do not create abstractions solely for future phases;
-4. satisfy the current exit criteria;
-5. benchmark only claims that are performance-related;
-6. prefer deleting unnecessary complexity over preserving it for hypothetical reuse.
+3. write/update the phase tests in the same change;
+4. do not create abstractions solely for future phases;
+5. satisfy the current exit criteria;
+6. require green CI before marking the phase complete;
+7. benchmark only claims that are performance-related;
+8. prefer deleting unnecessary complexity over preserving it for hypothetical reuse.
