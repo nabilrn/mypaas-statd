@@ -51,7 +51,7 @@ Implemented scope:
 
 **Goal:** expose latest snapshots safely to the local MyPaaS control plane.
 
-Implemented scope awaiting CI gate:
+Implemented scope:
 - AF_UNIX + SOCK_STREAM pathname server;
 - nonblocking fixed-slot `poll()` loop;
 - hello/protocol negotiation;
@@ -68,13 +68,7 @@ Constraints retained:
 - no HTTP/gRPC/protobuf/shared memory;
 - snapshot requests never trigger a full metrics sweep.
 
-Exit criteria:
-- `make test-phase3` covers fragmentation, multiple messages, oversized input, malformed request, unsupported version, handshake requirement, disconnect isolation, socket permissions/cleanup, registration, and snapshot response;
-- all previous phase tests remain green;
-- sanitizer clean;
-- GitHub Actions green.
-
-**Status:** in progress until remote CI validates the implementation commit.
+**Status:** complete. GCC, Clang, ASan/UBSan, and clang-tidy gates passed for the Phase 3 implementation and protocol integration tests.
 
 ## Phase 4 — MyPaaS integration and baseline comparison
 
@@ -95,6 +89,8 @@ Exit criteria:
 - benchmark records CPU, RSS, latency, syscall/process cost, and freshness;
 - statd provides meaningful measured benefit or integration is reconsidered;
 - GitHub Actions green for integration changes.
+
+**Status:** in progress. First slice is the tested Go protocol client on an isolated MyPaaS branch before wiring deployment lifecycle or replacing the Docker fallback path.
 
 ## Phase 5 — Mature v0.1 hardening
 
