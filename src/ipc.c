@@ -15,6 +15,7 @@ enum request_operation {
     REQUEST_NONE = 0,
     REQUEST_HELLO,
     REQUEST_REGISTER,
+    REQUEST_REGISTER_PID,
     REQUEST_UNREGISTER,
     REQUEST_SNAPSHOT,
     REQUEST_STATUS
@@ -28,6 +29,8 @@ struct request {
     char id[STATD_RUNTIME_ID_MAX + 1U];
     bool has_cgroup;
     char cgroup[STATD_CGROUP_PATH_MAX + 1U];
+    bool has_pid;
+    uint64_t pid;
 };
 
 static bool ascii_space(char ch)
@@ -98,6 +101,9 @@ static enum request_operation operation_from_string(const char *value)
     if (strcmp(value, "register") == 0) {
         return REQUEST_REGISTER;
     }
+    if (strcmp(value, "register_pid") == 0) {
+        return REQUEST_REGISTER_PID;
+    }
     if (strcmp(value, "unregister") == 0) {
         return REQUEST_UNREGISTER;
     }
@@ -110,6 +116,31 @@ static enum request_operation operation_from_string(const char *value)
     return REQUEST_NONE;
 }
 
+static bool request_shape_valid(const struct request *request)
+{
+    switch (request->operation) {
+    case REQUEST_HELLO:
+        return request->has_protocol && !request->has_id && !request->has_cgroup &&
+               !request->has_pid;
+    case REQUEST_REGISTER:
+        return !request->has_protocol && request->has_id && request->has_cgroup &&
+               !request->has_pid;
+    case REQUEST_REGISTER_PID:
+        return !request->has_protocol && request->has_id && !request->has_cgroup &&
+               request->has_pid && request->pid > 0U;
+    case REQUEST_UNREGISTER:
+    case REQUEST_SNAPSHOT:
+        return !request->has_protocol && request->has_id && !request->has_cgroup &&
+               !request->has_pid;
+    case REQUEST_STATUS:
+        return !request->has_protocol && !request->has_id && !request->has_cgroup &&
+               !request->has_pid;
+    case REQUEST_NONE:
+    default:
+        return false;
+    }
+}
+
 static bool parse_request(const char *input, size_t len, struct request *out)
 {
     size_t offset = 0U;
@@ -117,6 +148,7 @@ static bool parse_request(const char *input, size_t len, struct request *out)
     bool has_protocol = false;
     bool has_id = false;
     bool has_cgroup = false;
+    bool has_pid = false;
     char op_value[16];
     struct request parsed = {0};
 
@@ -174,6 +206,12 @@ static bool parse_request(const char *input, size_t len, struct request *out)
             }
             parsed.has_cgroup = true;
             has_cgroup = true;
+        } else if (strcmp(key, "pid") == 0) {
+            if (has_pid || !parse_u64_json(input, len, &offset, &parsed.pid)) {
+                return false;
+            }
+            parsed.has_pid = true;
+            has_pid = true;
         } else {
             return false;
         }
@@ -192,7 +230,7 @@ static bool parse_request(const char *input, size_t len, struct request *out)
     }
 
     skip_space(input, len, &offset);
-    if (offset != len || !has_op) {
+    if (offset != len || !has_op || !request_shape_valid(&parsed)) {
         return false;
     }
     *out = parsed;
@@ -308,6 +346,28 @@ static void queue_snapshot(struct statd_ipc_client *client, const struct statd_s
     client->output_offset = 0U;
 }
 
+static void register_cgroup(struct statd_ipc_server *server, struct statd_ipc_client *client,
+                            const char *id, const char *cgroup)
+{
+    struct statd_snapshot ignored = {0};
+    const enum statd_sampler_status status = statd_registry_register(server->registry, id, cgroup);
+
+    if (status == STATD_SAMPLER_LIMIT) {
+        queue_error(client, "REGISTRATION_LIMIT", false);
+        return;
+    }
+    if (status == STATD_SAMPLER_NOT_FOUND) {
+        queue_error(client, "CGROUP_NOT_FOUND", false);
+        return;
+    }
+    if (status != STATD_SAMPLER_OK) {
+        queue_error(client, "REGISTER_FAILED", false);
+        return;
+    }
+    (void)statd_registry_sample(server->registry, id, &ignored);
+    queue_text(client, "{\"ok\":true,\"protocol\":1}\n", false);
+}
+
 static void handle_request(struct statd_ipc_server *server, struct statd_ipc_client *client,
                            const char *message, size_t message_len)
 {
@@ -318,7 +378,7 @@ static void handle_request(struct statd_ipc_server *server, struct statd_ipc_cli
         return;
     }
     if (request.operation == REQUEST_HELLO) {
-        if (!request.has_protocol || request.protocol != STATD_PROTOCOL_VERSION) {
+        if (request.protocol != STATD_PROTOCOL_VERSION) {
             queue_error(client, "UNSUPPORTED_PROTOCOL", false);
             return;
         }
@@ -334,7 +394,8 @@ static void handle_request(struct statd_ipc_server *server, struct statd_ipc_cli
         return;
     }
 
-    if (request.operation == REQUEST_STATUS) {
+    switch (request.operation) {
+    case REQUEST_STATUS: {
         const int written = snprintf(client->output, sizeof(client->output),
                                      "{\"ok\":true,\"protocol\":1,\"registrations\":%zu}\n",
                                      server->registry->count);
@@ -346,44 +407,32 @@ static void handle_request(struct statd_ipc_server *server, struct statd_ipc_cli
         client->output_offset = 0U;
         return;
     }
-
-    if (!request.has_id) {
-        queue_error(client, "INVALID_REQUEST", false);
+    case REQUEST_REGISTER:
+        register_cgroup(server, client, request.id, request.cgroup);
+        return;
+    case REQUEST_REGISTER_PID: {
+        char resolved[STATD_CGROUP_PATH_MAX + 1U];
+        const enum statd_proc_status status =
+            statd_proc_resolve_cgroup(server->proc_root, request.pid, resolved, sizeof(resolved));
+        if (status == STATD_PROC_NOT_FOUND) {
+            queue_error(client, "PID_NOT_FOUND", false);
+            return;
+        }
+        if (status != STATD_PROC_OK) {
+            queue_error(client, "CGROUP_RESOLVE_FAILED", false);
+            return;
+        }
+        register_cgroup(server, client, request.id, resolved);
         return;
     }
-    if (request.operation == REQUEST_REGISTER) {
-        struct statd_snapshot ignored = {0};
-        enum statd_sampler_status status = STATD_SAMPLER_OK;
-        if (!request.has_cgroup) {
-            queue_error(client, "INVALID_REQUEST", false);
-            return;
-        }
-        status = statd_registry_register(server->registry, request.id, request.cgroup);
-        if (status == STATD_SAMPLER_LIMIT) {
-            queue_error(client, "REGISTRATION_LIMIT", false);
-            return;
-        }
-        if (status == STATD_SAMPLER_NOT_FOUND) {
-            queue_error(client, "CGROUP_NOT_FOUND", false);
-            return;
-        }
-        if (status != STATD_SAMPLER_OK) {
-            queue_error(client, "REGISTER_FAILED", false);
-            return;
-        }
-        (void)statd_registry_sample(server->registry, request.id, &ignored);
-        queue_text(client, "{\"ok\":true,\"protocol\":1}\n", false);
-        return;
-    }
-    if (request.operation == REQUEST_UNREGISTER) {
+    case REQUEST_UNREGISTER:
         if (statd_registry_unregister(server->registry, request.id) != STATD_SAMPLER_OK) {
             queue_error(client, "UNREGISTER_FAILED", false);
             return;
         }
         queue_text(client, "{\"ok\":true,\"protocol\":1}\n", false);
         return;
-    }
-    if (request.operation == REQUEST_SNAPSHOT) {
+    case REQUEST_SNAPSHOT: {
         bool has_snapshot = false;
         enum statd_sampler_status last_status = STATD_SAMPLER_OK;
         struct statd_snapshot snapshot = {0};
@@ -400,8 +449,12 @@ static void handle_request(struct statd_ipc_server *server, struct statd_ipc_cli
         queue_snapshot(client, &snapshot, last_status != STATD_SAMPLER_OK);
         return;
     }
-
-    queue_error(client, "INVALID_REQUEST", false);
+    case REQUEST_HELLO:
+    case REQUEST_NONE:
+    default:
+        queue_error(client, "INVALID_REQUEST", false);
+        return;
+    }
 }
 
 static bool find_line(const char *input, size_t len, size_t *line_len)
@@ -526,24 +579,29 @@ static void accept_clients(struct statd_ipc_server *server)
 
 enum statd_ipc_status statd_ipc_server_init(struct statd_ipc_server *server,
                                               struct statd_registry *registry,
-                                              const char *socket_path)
+                                              const char *socket_path,
+                                              const char *proc_root)
 {
     struct sockaddr_un address;
     struct stat st;
     size_t path_len = 0U;
+    size_t proc_len = 0U;
     size_t index = 0U;
 
-    if (server == NULL || registry == NULL || socket_path == NULL) {
+    if (server == NULL || registry == NULL || socket_path == NULL || proc_root == NULL) {
         return STATD_IPC_INVALID;
     }
     path_len = strnlen(socket_path, STATD_IPC_SOCKET_PATH_MAX + 1U);
-    if (path_len == 0U || path_len > STATD_IPC_SOCKET_PATH_MAX) {
+    proc_len = strnlen(proc_root, STATD_PROC_ROOT_MAX + 1U);
+    if (path_len == 0U || path_len > STATD_IPC_SOCKET_PATH_MAX || proc_len == 0U ||
+        proc_len > STATD_PROC_ROOT_MAX) {
         return STATD_IPC_INVALID;
     }
 
     memset(server, 0, sizeof(*server));
     server->listen_fd = -1;
     server->registry = registry;
+    memcpy(server->proc_root, proc_root, proc_len + 1U);
     for (index = 0U; index < STATD_IPC_MAX_CLIENTS; index++) {
         client_reset(&server->clients[index]);
     }
@@ -596,6 +654,7 @@ void statd_ipc_server_destroy(struct statd_ipc_server *server)
     }
     server->listen_fd = -1;
     server->socket_path[0] = '\0';
+    server->proc_root[0] = '\0';
 }
 
 enum statd_ipc_status statd_ipc_server_step(struct statd_ipc_server *server, int timeout_ms)

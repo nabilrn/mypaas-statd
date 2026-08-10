@@ -8,6 +8,7 @@
 
 #define MYPAAS_STATD_VERSION "0.1.0-dev"
 #define DEFAULT_CGROUP_ROOT "/sys/fs/cgroup"
+#define DEFAULT_PROC_ROOT "/proc"
 #define DEFAULT_SOCKET_PATH "/run/mypaas/statd.sock"
 #define SAMPLE_INTERVAL_NS UINT64_C(1000000000)
 
@@ -44,6 +45,7 @@ static uint64_t monotonic_ns(struct timespec value)
 int main(void)
 {
     const char *cgroup_root = getenv("MYPAAS_STATD_CGROUP_ROOT");
+    const char *proc_root = getenv("MYPAAS_STATD_PROC_ROOT");
     const char *socket_path = getenv("MYPAAS_STATD_SOCKET");
     struct statd_registry registry;
     struct statd_ipc_server server;
@@ -51,6 +53,9 @@ int main(void)
 
     if (cgroup_root == NULL || cgroup_root[0] == '\0') {
         cgroup_root = DEFAULT_CGROUP_ROOT;
+    }
+    if (proc_root == NULL || proc_root[0] == '\0') {
+        proc_root = DEFAULT_PROC_ROOT;
     }
     if (socket_path == NULL || socket_path[0] == '\0') {
         socket_path = DEFAULT_SOCKET_PATH;
@@ -63,7 +68,7 @@ int main(void)
         fprintf(stderr, "mypaas-statd: invalid cgroup root\n");
         return EXIT_FAILURE;
     }
-    if (statd_ipc_server_init(&server, &registry, socket_path) != STATD_IPC_OK) {
+    if (statd_ipc_server_init(&server, &registry, socket_path, proc_root) != STATD_IPC_OK) {
         perror("mypaas-statd: initialize unix socket");
         statd_registry_destroy(&registry);
         return EXIT_FAILURE;

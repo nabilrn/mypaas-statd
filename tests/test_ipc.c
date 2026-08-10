@@ -23,6 +23,9 @@ struct test_env {
     char base[256];
     char root[256];
     char group[256];
+    char proc_root[256];
+    char pid_dir[256];
+    char proc_cgroup[256];
     char socket_path[256];
     struct statd_registry registry;
     struct statd_ipc_server server;
@@ -58,10 +61,14 @@ static int env_init(struct test_env *env)
     if (snprintf(env->base, sizeof(env->base), "%s", base) < 0 ||
         snprintf(env->root, sizeof(env->root), "%s/root", base) < 0 ||
         snprintf(env->group, sizeof(env->group), "%s/root/workload", base) < 0 ||
+        snprintf(env->proc_root, sizeof(env->proc_root), "%s/proc", base) < 0 ||
+        snprintf(env->pid_dir, sizeof(env->pid_dir), "%s/proc/4321", base) < 0 ||
+        snprintf(env->proc_cgroup, sizeof(env->proc_cgroup), "%s/proc/4321/cgroup", base) < 0 ||
         snprintf(env->socket_path, sizeof(env->socket_path), "%s/statd.sock", base) < 0) {
         return -1;
     }
-    if (mkdir(env->root, 0700) != 0 || mkdir(env->group, 0700) != 0) {
+    if (mkdir(env->root, 0700) != 0 || mkdir(env->group, 0700) != 0 ||
+        mkdir(env->proc_root, 0700) != 0 || mkdir(env->pid_dir, 0700) != 0) {
         return -1;
     }
     if (write_text(env->group, "cpu.stat", "usage_usec 1000\n") != 0 ||
@@ -70,11 +77,13 @@ static int env_init(struct test_env *env)
         write_text(env->group, "memory.max", "max\n") != 0 ||
         write_text(env->group, "memory.events", "oom 2\noom_kill 1\n") != 0 ||
         write_text(env->group, "pids.current", "7\n") != 0 ||
-        write_text(env->group, "pids.max", "64\n") != 0) {
+        write_text(env->group, "pids.max", "64\n") != 0 ||
+        write_text(env->pid_dir, "cgroup", "0::/workload\n") != 0) {
         return -1;
     }
     if (statd_registry_init(&env->registry, env->root) != STATD_SAMPLER_OK ||
-        statd_ipc_server_init(&env->server, &env->registry, env->socket_path) != STATD_IPC_OK) {
+        statd_ipc_server_init(&env->server, &env->registry, env->socket_path, env->proc_root) !=
+            STATD_IPC_OK) {
         return -1;
     }
     return 0;
@@ -95,6 +104,9 @@ static void env_destroy(struct test_env *env)
             unlink(path);
         }
     }
+    unlink(env->proc_cgroup);
+    rmdir(env->pid_dir);
+    rmdir(env->proc_root);
     rmdir(env->group);
     rmdir(env->root);
     rmdir(env->base);
@@ -143,6 +155,16 @@ static int read_available(int fd, char *buffer, size_t capacity)
     return (int)count;
 }
 
+static int negotiate(struct statd_ipc_server *server, int client, char *response, size_t capacity)
+{
+    const char *hello = "{\"op\":\"hello\",\"protocol\":1}\n";
+    CHECK(send(client, hello, strlen(hello), 0) == (ssize_t)strlen(hello));
+    CHECK(pump(server, 4) == 0);
+    CHECK(read_available(client, response, capacity) > 0);
+    CHECK(strstr(response, "\"ok\":true") != NULL);
+    return 0;
+}
+
 static int test_permissions_and_hello(void)
 {
     struct test_env env;
@@ -155,10 +177,7 @@ static int test_permissions_and_hello(void)
     CHECK((st.st_mode & 0777) == 0600);
     client = connect_client(env.socket_path);
     CHECK(client >= 0);
-    CHECK(send(client, "{\"op\":\"hello\",\"protocol\":1}\n", 28U, 0) == 28);
-    CHECK(pump(&env.server, 4) == 0);
-    CHECK(read_available(client, response, sizeof(response)) > 0);
-    CHECK(strstr(response, "\"ok\":true") != NULL);
+    CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
     CHECK(strstr(response, "\"protocol\":1") != NULL);
     close(client);
     env_destroy(&env);
@@ -171,7 +190,6 @@ static int test_fragmented_register_and_snapshot(void)
     struct test_env env;
     char response[4096];
     int client = -1;
-    const char *hello = "{\"op\":\"hello\",\"protocol\":1}\n";
     const char *part1 = "{\"op\":\"register\",\"id\":\"runtime-1\",";
     const char *part2 = "\"cgroup\":\"workload\"}\n";
     const char *snapshot = "{\"op\":\"snapshot\",\"id\":\"runtime-1\"}\n";
@@ -179,9 +197,7 @@ static int test_fragmented_register_and_snapshot(void)
     CHECK(env_init(&env) == 0);
     client = connect_client(env.socket_path);
     CHECK(client >= 0);
-    CHECK(send(client, hello, strlen(hello), 0) == (ssize_t)strlen(hello));
-    CHECK(pump(&env.server, 4) == 0);
-    CHECK(read_available(client, response, sizeof(response)) > 0);
+    CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
 
     CHECK(send(client, part1, strlen(part1), 0) == (ssize_t)strlen(part1));
     CHECK(pump(&env.server, 2) == 0);
@@ -197,6 +213,52 @@ static int test_fragmented_register_and_snapshot(void)
     CHECK(strstr(response, "\"valid\":true") != NULL);
     CHECK(strstr(response, "\"current_bytes\":4096") != NULL);
     CHECK(strstr(response, "\"max_bytes\":null") != NULL);
+    close(client);
+    env_destroy(&env);
+    return 0;
+}
+
+static int test_register_pid(void)
+{
+    struct test_env env;
+    char response[4096];
+    int client = -1;
+    const char *register_pid = "{\"op\":\"register_pid\",\"id\":\"runtime-pid\",\"pid\":4321}\n";
+    const char *snapshot = "{\"op\":\"snapshot\",\"id\":\"runtime-pid\"}\n";
+
+    CHECK(env_init(&env) == 0);
+    client = connect_client(env.socket_path);
+    CHECK(client >= 0);
+    CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
+    CHECK(send(client, register_pid, strlen(register_pid), 0) == (ssize_t)strlen(register_pid));
+    CHECK(pump(&env.server, 4) == 0);
+    CHECK(read_available(client, response, sizeof(response)) > 0);
+    CHECK(strstr(response, "\"ok\":true") != NULL);
+
+    CHECK(send(client, snapshot, strlen(snapshot), 0) == (ssize_t)strlen(snapshot));
+    CHECK(pump(&env.server, 4) == 0);
+    CHECK(read_available(client, response, sizeof(response)) > 0);
+    CHECK(strstr(response, "\"current_bytes\":4096") != NULL);
+    close(client);
+    env_destroy(&env);
+    return 0;
+}
+
+static int test_register_pid_not_found(void)
+{
+    struct test_env env;
+    char response[1024];
+    int client = -1;
+    const char *request = "{\"op\":\"register_pid\",\"id\":\"missing\",\"pid\":5555}\n";
+
+    CHECK(env_init(&env) == 0);
+    client = connect_client(env.socket_path);
+    CHECK(client >= 0);
+    CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
+    CHECK(send(client, request, strlen(request), 0) == (ssize_t)strlen(request));
+    CHECK(pump(&env.server, 4) == 0);
+    CHECK(read_available(client, response, sizeof(response)) > 0);
+    CHECK(strstr(response, "PID_NOT_FOUND") != NULL);
     close(client);
     env_destroy(&env);
     return 0;
@@ -318,6 +380,8 @@ int main(void)
 {
     CHECK(test_permissions_and_hello() == 0);
     CHECK(test_fragmented_register_and_snapshot() == 0);
+    CHECK(test_register_pid() == 0);
+    CHECK(test_register_pid_not_found() == 0);
     CHECK(test_multiple_messages_and_errors() == 0);
     CHECK(test_protocol_and_handshake_errors() == 0);
     CHECK(test_oversized_and_broken_client_isolation() == 0);
