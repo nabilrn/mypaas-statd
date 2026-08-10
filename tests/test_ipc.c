@@ -198,7 +198,6 @@ static int test_fragmented_register_and_snapshot(void)
     client = connect_client(env.socket_path);
     CHECK(client >= 0);
     CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
-
     CHECK(send(client, part1, strlen(part1), 0) == (ssize_t)strlen(part1));
     CHECK(pump(&env.server, 2) == 0);
     CHECK(read_available(client, response, sizeof(response)) == 0);
@@ -206,7 +205,6 @@ static int test_fragmented_register_and_snapshot(void)
     CHECK(pump(&env.server, 4) == 0);
     CHECK(read_available(client, response, sizeof(response)) > 0);
     CHECK(strstr(response, "\"ok\":true") != NULL);
-
     CHECK(send(client, snapshot, strlen(snapshot), 0) == (ssize_t)strlen(snapshot));
     CHECK(pump(&env.server, 4) == 0);
     CHECK(read_available(client, response, sizeof(response)) > 0);
@@ -218,23 +216,22 @@ static int test_fragmented_register_and_snapshot(void)
     return 0;
 }
 
-static int test_register_pid(void)
+static int test_register_by_pid(void)
 {
     struct test_env env;
     char response[4096];
     int client = -1;
-    const char *register_pid = "{\"op\":\"register_pid\",\"id\":\"runtime-pid\",\"pid\":4321}\n";
+    const char *registration = "{\"op\":\"register\",\"id\":\"runtime-pid\",\"pid\":4321}\n";
     const char *snapshot = "{\"op\":\"snapshot\",\"id\":\"runtime-pid\"}\n";
 
     CHECK(env_init(&env) == 0);
     client = connect_client(env.socket_path);
     CHECK(client >= 0);
     CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
-    CHECK(send(client, register_pid, strlen(register_pid), 0) == (ssize_t)strlen(register_pid));
+    CHECK(send(client, registration, strlen(registration), 0) == (ssize_t)strlen(registration));
     CHECK(pump(&env.server, 4) == 0);
     CHECK(read_available(client, response, sizeof(response)) > 0);
     CHECK(strstr(response, "\"ok\":true") != NULL);
-
     CHECK(send(client, snapshot, strlen(snapshot), 0) == (ssize_t)strlen(snapshot));
     CHECK(pump(&env.server, 4) == 0);
     CHECK(read_available(client, response, sizeof(response)) > 0);
@@ -249,7 +246,7 @@ static int test_register_pid_not_found(void)
     struct test_env env;
     char response[1024];
     int client = -1;
-    const char *request = "{\"op\":\"register_pid\",\"id\":\"missing\",\"pid\":5555}\n";
+    const char *request = "{\"op\":\"register\",\"id\":\"missing\",\"pid\":5555}\n";
 
     CHECK(env_init(&env) == 0);
     client = connect_client(env.socket_path);
@@ -259,6 +256,26 @@ static int test_register_pid_not_found(void)
     CHECK(pump(&env.server, 4) == 0);
     CHECK(read_available(client, response, sizeof(response)) > 0);
     CHECK(strstr(response, "PID_NOT_FOUND") != NULL);
+    close(client);
+    env_destroy(&env);
+    return 0;
+}
+
+static int test_register_requires_exactly_one_source(void)
+{
+    struct test_env env;
+    char response[1024];
+    int client = -1;
+    const char *both = "{\"op\":\"register\",\"id\":\"bad\",\"pid\":4321,\"cgroup\":\"workload\"}\n";
+
+    CHECK(env_init(&env) == 0);
+    client = connect_client(env.socket_path);
+    CHECK(client >= 0);
+    CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
+    CHECK(send(client, both, strlen(both), 0) == (ssize_t)strlen(both));
+    CHECK(pump(&env.server, 4) == 0);
+    CHECK(read_available(client, response, sizeof(response)) > 0);
+    CHECK(strstr(response, "INVALID_REQUEST") != NULL);
     close(client);
     env_destroy(&env);
     return 0;
@@ -280,7 +297,6 @@ static int test_multiple_messages_and_errors(void)
     CHECK(read_available(client, response, sizeof(response)) > 0);
     CHECK(strstr(response, "\"agent\":\"mypaas-statd\"") != NULL);
     CHECK(strstr(response, "\"registrations\":0") != NULL);
-
     CHECK(send(client, bad, strlen(bad), 0) == (ssize_t)strlen(bad));
     CHECK(pump(&env.server, 4) == 0);
     CHECK(read_available(client, response, sizeof(response)) > 0);
@@ -364,7 +380,6 @@ static int test_disconnect_does_not_stop_server(void)
     CHECK(pump(&env.server, 2) == 0);
     close(first);
     CHECK(pump(&env.server, 2) == 0);
-
     second = connect_client(env.socket_path);
     CHECK(second >= 0);
     CHECK(send(second, hello, strlen(hello), 0) == (ssize_t)strlen(hello));
@@ -380,8 +395,9 @@ int main(void)
 {
     CHECK(test_permissions_and_hello() == 0);
     CHECK(test_fragmented_register_and_snapshot() == 0);
-    CHECK(test_register_pid() == 0);
+    CHECK(test_register_by_pid() == 0);
     CHECK(test_register_pid_not_found() == 0);
+    CHECK(test_register_requires_exactly_one_source() == 0);
     CHECK(test_multiple_messages_and_errors() == 0);
     CHECK(test_protocol_and_handshake_errors() == 0);
     CHECK(test_oversized_and_broken_client_isolation() == 0);

@@ -15,7 +15,6 @@ enum request_operation {
     REQUEST_NONE = 0,
     REQUEST_HELLO,
     REQUEST_REGISTER,
-    REQUEST_REGISTER_PID,
     REQUEST_UNREGISTER,
     REQUEST_SNAPSHOT,
     REQUEST_STATUS
@@ -101,9 +100,6 @@ static enum request_operation operation_from_string(const char *value)
     if (strcmp(value, "register") == 0) {
         return REQUEST_REGISTER;
     }
-    if (strcmp(value, "register_pid") == 0) {
-        return REQUEST_REGISTER_PID;
-    }
     if (strcmp(value, "unregister") == 0) {
         return REQUEST_UNREGISTER;
     }
@@ -123,11 +119,9 @@ static bool request_shape_valid(const struct request *request)
         return request->has_protocol && !request->has_id && !request->has_cgroup &&
                !request->has_pid;
     case REQUEST_REGISTER:
-        return !request->has_protocol && request->has_id && request->has_cgroup &&
-               !request->has_pid;
-    case REQUEST_REGISTER_PID:
-        return !request->has_protocol && request->has_id && !request->has_cgroup &&
-               request->has_pid && request->pid > 0U;
+        return !request->has_protocol && request->has_id &&
+               (request->has_cgroup != request->has_pid) &&
+               (!request->has_pid || request->pid > 0U);
     case REQUEST_UNREGISTER:
     case REQUEST_SNAPSHOT:
         return !request->has_protocol && request->has_id && !request->has_cgroup &&
@@ -408,23 +402,23 @@ static void handle_request(struct statd_ipc_server *server, struct statd_ipc_cli
         return;
     }
     case REQUEST_REGISTER:
+        if (request.has_pid) {
+            char resolved[STATD_CGROUP_PATH_MAX + 1U];
+            const enum statd_proc_status status = statd_proc_resolve_cgroup(
+                server->proc_root, request.pid, resolved, sizeof(resolved));
+            if (status == STATD_PROC_NOT_FOUND) {
+                queue_error(client, "PID_NOT_FOUND", false);
+                return;
+            }
+            if (status != STATD_PROC_OK) {
+                queue_error(client, "CGROUP_RESOLVE_FAILED", false);
+                return;
+            }
+            register_cgroup(server, client, request.id, resolved);
+            return;
+        }
         register_cgroup(server, client, request.id, request.cgroup);
         return;
-    case REQUEST_REGISTER_PID: {
-        char resolved[STATD_CGROUP_PATH_MAX + 1U];
-        const enum statd_proc_status status =
-            statd_proc_resolve_cgroup(server->proc_root, request.pid, resolved, sizeof(resolved));
-        if (status == STATD_PROC_NOT_FOUND) {
-            queue_error(client, "PID_NOT_FOUND", false);
-            return;
-        }
-        if (status != STATD_PROC_OK) {
-            queue_error(client, "CGROUP_RESOLVE_FAILED", false);
-            return;
-        }
-        register_cgroup(server, client, request.id, resolved);
-        return;
-    }
     case REQUEST_UNREGISTER:
         if (statd_registry_unregister(server->registry, request.id) != STATD_SAMPLER_OK) {
             queue_error(client, "UNREGISTER_FAILED", false);
