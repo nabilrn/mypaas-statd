@@ -15,6 +15,7 @@ PHASE1_TEST_BIN := build/test_cgroup_parse
 PHASE2_TEST_BIN := build/test_sampler
 PHASE3_TEST_BIN := build/test_ipc
 PHASE4_TEST_BIN := build/test_proc_cgroup
+PHASE4_EVICTION_BIN := build/test_eviction
 
 .PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-packaging test-benchmark-harness sanitize lint format verify install
 
@@ -45,6 +46,11 @@ $(PHASE3_TEST_BIN): tests/test_ipc.c src/cgroup_parse.c src/cgroup_reader.c src/
 $(PHASE4_TEST_BIN): tests/test_proc_cgroup.c src/proc_cgroup.c include/proc_cgroup.h | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_proc_cgroup.c src/proc_cgroup.c -o $@
 
+$(PHASE4_EVICTION_BIN): tests/test_eviction.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c \
+		include/cgroup_parse.h include/cgroup_reader.h include/sampler.h | build
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_eviction.c src/cgroup_parse.c \
+		src/cgroup_reader.c src/sampler.c -lm -o $@
+
 test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-packaging test-benchmark-harness
 	./$(SMOKE_BIN)
 
@@ -57,8 +63,9 @@ test-phase2: $(PHASE2_TEST_BIN)
 test-phase3: $(PHASE3_TEST_BIN)
 	./$(PHASE3_TEST_BIN)
 
-test-phase4: $(PHASE4_TEST_BIN)
+test-phase4: $(PHASE4_TEST_BIN) $(PHASE4_EVICTION_BIN)
 	./$(PHASE4_TEST_BIN)
+	./$(PHASE4_EVICTION_BIN)
 
 test-packaging: all
 	bash tests/test_packaging.sh
@@ -87,11 +94,15 @@ sanitize: | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
 		-fsanitize=address,undefined tests/test_proc_cgroup.c src/proc_cgroup.c \
 		-o build/test-proc-cgroup-sanitize
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
+		-fsanitize=address,undefined tests/test_eviction.c src/cgroup_parse.c src/cgroup_reader.c \
+		src/sampler.c -lm -o build/test-eviction-sanitize
 	./build/test-smoke-sanitize
 	./build/test-cgroup-parse-sanitize
 	./build/test-sampler-sanitize
 	./build/test-ipc-sanitize
 	./build/test-proc-cgroup-sanitize
+	./build/test-eviction-sanitize
 
 lint:
 	@command -v clang-tidy >/dev/null 2>&1 || { echo "clang-tidy not installed"; exit 1; }
