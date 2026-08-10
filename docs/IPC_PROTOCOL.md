@@ -1,32 +1,34 @@
 # IPC Protocol v1
 
-Status: design contract for v0.1; implementation has not started.
+Status: implemented in Phase 3 and gated by integration tests.
 
 ## Transport
 
-- `AF_UNIX`
-- `SOCK_STREAM`
-- default path: `/run/mypaas/statd.sock`
-- UTF-8 newline-delimited JSON (one object per line)
-- maximum encoded request/response message: 64 KiB unless deliberately revised
+- Linux `AF_UNIX` pathname socket;
+- `SOCK_STREAM`;
+- default path: `/run/mypaas/statd.sock`;
+- UTF-8 JSON objects delimited by newline;
+- maximum encoded request line: 8 KiB;
+- maximum simultaneous clients: 8;
+- socket mode after bind: `0600`.
 
-The server does not listen on TCP.
+The server does not listen on TCP. Because the stream transport does not preserve message boundaries, clients may fragment a request across writes or batch several newline-delimited requests in one write.
 
-## General response shape
+## v1 request subset
 
-Success:
-```json
-{"ok":true,"protocol":1}
-```
+To keep the privileged daemon parser small and auditable, v1 request objects use a deliberately strict JSON subset:
+- object keys are `op`, `protocol`, `id`, and `cgroup` only;
+- string keys/values are printable unescaped ASCII; JSON string escape sequences are not accepted in v1;
+- unknown and duplicate fields are rejected;
+- numeric `protocol` is unsigned decimal;
+- every request is one JSON object followed by `\n`;
+- embedded NUL is invalid.
 
-Failure:
-```json
-{"ok":false,"error":{"code":"INVALID_REQUEST","message":"..."}}
-```
+This is a protocol constraint, not a claim to implement a general JSON parser. MyPaaS controls the client and can emit this canonical representation directly.
 
-Error messages must not expose arbitrary host file content.
+## Handshake
 
-## hello
+Every new connection starts unnegotiated.
 
 Request:
 ```json
@@ -35,25 +37,24 @@ Request:
 
 Response:
 ```json
-{"ok":true,"protocol":1,"agent":"mypaas-statd","version":"0.1.0"}
+{"ok":true,"protocol":1,"agent":"mypaas-statd","version":"0.1.0-dev"}
 ```
 
-A protocol mismatch returns an explicit unsupported-protocol error.
+Any non-hello operation before a successful handshake returns `HELLO_REQUIRED`. A protocol mismatch returns `UNSUPPORTED_PROTOCOL`.
 
 ## register
 
-Conceptual request:
 ```json
-{"op":"register","id":"runtime-id","service":"api","cgroup":"system.slice/runtime.scope"}
+{"op":"register","id":"runtime-id","cgroup":"system.slice/runtime.scope"}
 ```
 
-Requirements:
-- all strings bounded;
-- `id` is the stable lookup key supplied by MyPaaS;
-- `service` is presentation metadata only;
-- `cgroup` is a path relative to statd's configured cgroup root, never an arbitrary absolute host path;
-- Phase 2 path validation rejects absolute paths, `.`/`..`, empty path components, and symlink traversal;
-- v0.1 duplicate IDs are rejected rather than implicitly replacing the active registration.
+Requirements and semantics:
+- `id` is a non-empty stable lookup key supplied by MyPaaS, maximum 127 bytes;
+- presentation metadata such as service name remains owned by the Go control plane and is not duplicated in statd v1;
+- `cgroup` is a non-empty path relative to statd's configured cgroup root;
+- Phase 2 validation rejects absolute paths, `.`/`..`, empty components, and symlink traversal;
+- duplicate IDs are rejected;
+- successful registration performs one initial sample of that runtime so a snapshot can normally be served immediately; failure of that initial sample does not fabricate metrics.
 
 ## unregister
 
@@ -61,28 +62,37 @@ Requirements:
 {"op":"unregister","id":"runtime-id"}
 ```
 
-Operation is idempotent in v0.1.
+Unregister is idempotent.
 
 ## snapshot
 
-Single runtime:
 ```json
 {"op":"snapshot","id":"runtime-id"}
 ```
 
-Response shape will carry an explicit validity state and typed CPU/memory/PID data. It must distinguish unlimited limits from numeric zero and unavailable metrics from valid zero.
+A successful response includes typed CPU, memory, and PID values. Unlimited limits are JSON `null`, not numeric zero. CPU percent is `null` until a valid delta exists. `stale:true` means a previous valid snapshot is being returned after the most recent sampling attempt failed.
 
-A future batch snapshot operation may be added if MyPaaS needs it. Do not add protocol surface speculatively.
+If no valid snapshot has ever been collected, the response is `METRICS_UNAVAILABLE`; unknown IDs return `NOT_FOUND`.
 
-## Stream handling
+A snapshot request only reads the latest in-memory snapshot; it does not trigger a metrics sweep.
 
-Because SOCK_STREAM does not preserve message boundaries:
-- callers must accumulate until newline;
-- handle partial `recv`/`send`;
-- reject a message that exceeds the configured maximum before newline;
-- one slow/malformed peer must not create unbounded memory growth;
-- embedded NUL bytes are invalid protocol input.
+## status
+
+```json
+{"op":"status"}
+```
+
+Returns the current registration count. It is intentionally small and is not a general diagnostics endpoint.
+
+## Error behavior
+
+Errors use stable machine-readable codes, for example:
+```json
+{"ok":false,"error":{"code":"INVALID_REQUEST"}}
+```
+
+A malformed request does not terminate the daemon. Oversized input returns `MESSAGE_TOO_LARGE` and closes that client after the error is written. A broken/slow client cannot create unbounded per-client buffers or block other client slots.
 
 ## Compatibility
 
-Protocol changes are versioned independently from daemon release versions. MyPaaS must negotiate/check protocol compatibility instead of assuming `latest` is compatible.
+Protocol changes are versioned independently from daemon release versions. MyPaaS must perform the hello negotiation instead of assuming `latest` is compatible.

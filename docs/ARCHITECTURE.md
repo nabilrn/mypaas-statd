@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`mypaas-statd` separates high-frequency Linux runtime telemetry from the MyPaaS Go control plane. MyPaaS remains responsible for projects, deployments, Docker lifecycle, database state, routing, authentication, and user-facing APIs. statd owns only kernel-facing metric sampling and local snapshot serving.
+`mypaas-statd` separates high-frequency Linux runtime telemetry from the MyPaaS Go control plane. MyPaaS remains responsible for projects, deployments, Docker lifecycle, database state, routing, authentication, presentation metadata, and user-facing APIs. statd owns only kernel-facing metric sampling and local snapshot serving.
 
 ## Boundary
 
@@ -23,27 +23,27 @@ The control plane resolves runtime identity and supplies a stable runtime identi
 ## Components
 
 ### IPC server
-Accepts local clients, validates bounded protocol messages, performs registration/unregistration/snapshot operations, and serializes responses. It must never trigger a full synchronous metrics sweep solely because a dashboard requested a snapshot.
+Phase 3 uses one nonblocking AF_UNIX listener plus `poll()` over a fixed maximum of eight client slots. Accepted sockets are explicitly nonblocking and close-on-exec. Each client has fixed input/output buffers; partial stream reads/writes are handled without heap growth. A client with pending output is not allowed to accumulate another unbounded request stream.
 
-Implementation begins in Phase 3.
+The server implements only hello/version negotiation, register, unregister, latest snapshot, and registration-count status. It does not expose TCP, HTTP, gRPC, or a generic command framework.
 
 ### Registry
-Phase 2 uses a fixed-capacity registry of 64 runtime entries with runtime IDs limited to 127 bytes. Each active entry owns one safely opened cgroup directory file descriptor, previous CPU sample state, and the latest successful snapshot. No heap-backed dynamically growing registry is required for v0.1.
+The fixed-capacity registry contains 64 runtime entries with runtime IDs limited to 127 bytes. Each active entry owns one safely opened cgroup directory file descriptor, previous CPU sample state, last sampling result, and latest successful snapshot. No heap-backed dynamically growing registry is required for v0.1.
 
-Duplicate registration IDs are rejected rather than silently replaced. Unregister is idempotent. These semantics remain subject to the Phase 3 protocol contract.
+Duplicate registration IDs are rejected. Unregister is idempotent.
 
 ### cgroup reader
-The configured cgroup root is trusted administrator configuration. Runtime cgroup paths are relative to that root. statd opens each path component with `openat()` plus `O_DIRECTORY`, `O_NOFOLLOW`, and `O_CLOEXEC`; absolute paths, `.`/`..`, empty components, and symlink components are rejected. This avoids guessing Docker-specific filesystem layout and avoids pathname traversal through symlinks.
+The configured cgroup root is trusted administrator configuration. Runtime cgroup paths are relative to that root. statd opens each path component with `openat()` plus `O_DIRECTORY`, `O_NOFOLLOW`, and `O_CLOEXEC`; absolute paths, `.`/`..`, empty components, and symlink components are rejected.
 
-Controller files are opened relative to the already validated cgroup directory. Each file is read with a fixed 4096-byte bound and closed after the sample. Persistent per-controller file descriptors are not introduced without measurement.
+Controller files are opened relative to the validated cgroup directory. Each file is read with a fixed 4096-byte bound and closed after the sample. Persistent per-controller file descriptors are not introduced without measurement.
 
 ### Sampler
-The sampler reads one registered cgroup snapshot, timestamps it with `CLOCK_MONOTONIC`, and computes CPU utilization from consecutive `usage_usec` samples. The first sample, a non-positive elapsed interval, or a regressed CPU counter establishes a new baseline and reports CPU percentage as unavailable for that sample.
+The sampler reads registered cgroups, timestamps samples with `CLOCK_MONOTONIC`, and computes CPU utilization from consecutive `usage_usec` samples. The first sample, a non-positive elapsed interval, or a regressed CPU counter establishes a new baseline and reports CPU percentage as unavailable.
 
-The Phase 2 API is explicitly tick-driven; the daemon's periodic scheduling loop is added only when the runtime server is assembled. This keeps sampler state deterministic and unit-testable.
+The daemon performs periodic sampling independently of client snapshot requests. Registration performs one initial per-runtime sample; normal snapshot requests return the latest cached result. A failed sample records its status but preserves the last good snapshot, which the IPC layer can mark stale.
 
 ### Parsers
-Pure bounded functions parse controller text without file I/O or heap allocation. Parser tests use deterministic fixtures and do not require a live cgroup hierarchy.
+Pure bounded functions parse controller text without file I/O or heap allocation.
 
 ## Data flow
 
@@ -51,40 +51,43 @@ Pure bounded functions parse controller text without file I/O or heap allocation
 register runtime
     |
     v
-open relative cgroup path safely beneath root
+safe relative cgroup open
     |
     v
 fixed registry entry + cgroup dir fd
     |
- sampler tick
+ periodic sampler (~1 s)
     |
     +--> cpu.stat / cpu.max
     +--> memory.current / memory.max / memory.events
     +--> pids.current / pids.max
     |
     v
-latest snapshot
+latest snapshot + last sample status
     |
- snapshot request (Phase 3)
+ snapshot request
     v
-Unix socket response
+poll-based Unix socket response
 ```
 
 ## Failure isolation
 
 One malformed/disappeared cgroup must not crash the daemon or invalidate unrelated registrations. A failed read does not replace the last good snapshot with believable zeroes.
 
-A malformed client message terminates or rejects that request/client according to protocol rules; it must not terminate the daemon.
+Malformed, oversized, disconnected, or broken IPC clients are isolated to their fixed client slot. Runtime client errors do not terminate the daemon.
 
 ## Resource bounds
 
-Current v0.1 bounds established by Phase 2:
-- maximum registrations: 64;
-- maximum runtime ID bytes: 127;
-- maximum relative cgroup path bytes: 4096;
-- maximum controller file bytes: 4096.
+Current v0.1 bounds:
+- registrations: 64;
+- runtime ID: 127 bytes;
+- relative cgroup path: 4096 bytes;
+- controller file: 4096 bytes;
+- simultaneous IPC clients: 8;
+- IPC request: 8192 bytes;
+- per-client response buffer: 4096 bytes.
 
-Phase 3 will establish explicit client/message/output limits before the IPC server is considered complete. No network listener is required.
+These bounds are intentionally conservative and may only increase when the actual MyPaaS integration needs it.
 
 ## Future expansion
 

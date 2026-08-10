@@ -113,22 +113,24 @@ static struct statd_registration *find_registration(struct statd_registry *regis
         return NULL;
     }
     for (index = 0U; index < STATD_MAX_REGISTRATIONS; index++) {
-        if (registry->registrations[index].used && strcmp(registry->registrations[index].id, id) == 0) {
+        if (registry->registrations[index].used &&
+            strcmp(registry->registrations[index].id, id) == 0) {
             return &registry->registrations[index];
         }
     }
     return NULL;
 }
 
-static const struct statd_registration *find_registration_const(const struct statd_registry *registry,
-                                                                 const char *id)
+static const struct statd_registration *find_registration_const(
+    const struct statd_registry *registry, const char *id)
 {
     size_t index = 0U;
     if (registry == NULL || id == NULL) {
         return NULL;
     }
     for (index = 0U; index < STATD_MAX_REGISTRATIONS; index++) {
-        if (registry->registrations[index].used && strcmp(registry->registrations[index].id, id) == 0) {
+        if (registry->registrations[index].used &&
+            strcmp(registry->registrations[index].id, id) == 0) {
             return &registry->registrations[index];
         }
     }
@@ -192,6 +194,9 @@ enum statd_sampler_status statd_registry_register(struct statd_registry *registr
     if (open_status == STATD_CGROUP_NOT_FOUND) {
         return STATD_SAMPLER_NOT_FOUND;
     }
+    if (open_status == STATD_CGROUP_INVALID) {
+        return STATD_SAMPLER_INVALID;
+    }
     if (open_status != STATD_CGROUP_OK) {
         return STATD_SAMPLER_CGROUP_ERROR;
     }
@@ -202,6 +207,7 @@ enum statd_sampler_status statd_registry_register(struct statd_registry *registr
             memset(registration, 0, sizeof(*registration));
             registration->used = true;
             registration->cgroup_fd = cgroup_fd;
+            registration->last_sample_status = STATD_SAMPLER_NOT_FOUND;
             memcpy(registration->id, id, id_len);
             registration->id[id_len] = '\0';
             statd_sample_state_init(&registration->state);
@@ -217,10 +223,11 @@ enum statd_sampler_status statd_registry_register(struct statd_registry *registr
 enum statd_sampler_status statd_registry_unregister(struct statd_registry *registry,
                                                      const char *id)
 {
-    struct statd_registration *registration = find_registration(registry, id);
+    struct statd_registration *registration = NULL;
     if (registry == NULL || id == NULL) {
         return STATD_SAMPLER_INVALID;
     }
+    registration = find_registration(registry, id);
     if (registration == NULL) {
         return STATD_SAMPLER_OK;
     }
@@ -233,17 +240,19 @@ enum statd_sampler_status statd_registry_unregister(struct statd_registry *regis
 enum statd_sampler_status statd_registry_sample(struct statd_registry *registry, const char *id,
                                                  struct statd_snapshot *out)
 {
-    struct statd_registration *registration = find_registration(registry, id);
+    struct statd_registration *registration = NULL;
     struct statd_snapshot next = {0};
     enum statd_sampler_status status = STATD_SAMPLER_OK;
 
     if (registry == NULL || id == NULL || out == NULL) {
         return STATD_SAMPLER_INVALID;
     }
+    registration = find_registration(registry, id);
     if (registration == NULL) {
         return STATD_SAMPLER_NOT_FOUND;
     }
     status = statd_sample_once(registration->cgroup_fd, &registration->state, &next);
+    registration->last_sample_status = status;
     if (status != STATD_SAMPLER_OK) {
         return status;
     }
@@ -253,16 +262,49 @@ enum statd_sampler_status statd_registry_sample(struct statd_registry *registry,
     return STATD_SAMPLER_OK;
 }
 
+void statd_registry_sample_all(struct statd_registry *registry)
+{
+    size_t index = 0U;
+    if (registry == NULL) {
+        return;
+    }
+    for (index = 0U; index < STATD_MAX_REGISTRATIONS; index++) {
+        struct statd_registration *registration = &registry->registrations[index];
+        if (registration->used) {
+            struct statd_snapshot ignored = {0};
+            (void)statd_registry_sample(registry, registration->id, &ignored);
+        }
+    }
+}
+
 enum statd_sampler_status statd_registry_latest(const struct statd_registry *registry,
                                                  const char *id, struct statd_snapshot *out)
 {
-    const struct statd_registration *registration = find_registration_const(registry, id);
+    const struct statd_registration *registration = NULL;
     if (registry == NULL || id == NULL || out == NULL) {
         return STATD_SAMPLER_INVALID;
     }
+    registration = find_registration_const(registry, id);
     if (registration == NULL || !registration->has_snapshot) {
         return STATD_SAMPLER_NOT_FOUND;
     }
     *out = registration->latest;
+    return STATD_SAMPLER_OK;
+}
+
+enum statd_sampler_status statd_registry_runtime_state(const struct statd_registry *registry,
+                                                        const char *id, bool *out_has_snapshot,
+                                                        enum statd_sampler_status *out_last_status)
+{
+    const struct statd_registration *registration = NULL;
+    if (registry == NULL || id == NULL || out_has_snapshot == NULL || out_last_status == NULL) {
+        return STATD_SAMPLER_INVALID;
+    }
+    registration = find_registration_const(registry, id);
+    if (registration == NULL) {
+        return STATD_SAMPLER_NOT_FOUND;
+    }
+    *out_has_snapshot = registration->has_snapshot;
+    *out_last_status = registration->last_sample_status;
     return STATD_SAMPLER_OK;
 }

@@ -45,6 +45,7 @@ struct statd_registration {
     int cgroup_fd;
     struct statd_sample_state state;
     bool has_snapshot;
+    enum statd_sampler_status last_sample_status;
     struct statd_snapshot latest;
 };
 
@@ -71,7 +72,11 @@ enum statd_sampler_status statd_registry_unregister(struct statd_registry *regis
                                                      const char *id);
 enum statd_sampler_status statd_registry_sample(struct statd_registry *registry, const char *id,
                                                  struct statd_snapshot *out);
+void statd_registry_sample_all(struct statd_registry *registry);
 enum statd_sampler_status statd_registry_latest(const struct statd_registry *registry,
                                                  const char *id, struct statd_snapshot *out);
+enum statd_sampler_status statd_registry_runtime_state(const struct statd_registry *registry,
+                                                        const char *id, bool *out_has_snapshot,
+                                                        enum statd_sampler_status *out_last_status);
 
 #endif

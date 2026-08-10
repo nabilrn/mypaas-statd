@@ -1,8 +1,15 @@
+#include "ipc.h"
+#include "sampler.h"
+
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #define MYPAAS_STATD_VERSION "0.1.0-dev"
+#define DEFAULT_CGROUP_ROOT "/sys/fs/cgroup"
+#define DEFAULT_SOCKET_PATH "/run/mypaas/statd.sock"
+#define SAMPLE_INTERVAL_NS UINT64_C(1000000000)
 
 static volatile sig_atomic_t g_stop_requested = 0;
 
@@ -29,19 +36,57 @@ static int install_signal_handlers(void)
     return 0;
 }
 
+static uint64_t monotonic_ns(struct timespec value)
+{
+    return (uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec;
+}
+
 int main(void)
 {
+    const char *cgroup_root = getenv("MYPAAS_STATD_CGROUP_ROOT");
+    const char *socket_path = getenv("MYPAAS_STATD_SOCKET");
+    struct statd_registry registry;
+    struct statd_ipc_server server;
+    uint64_t next_sample_ns = 0U;
+
+    if (cgroup_root == NULL || cgroup_root[0] == '\0') {
+        cgroup_root = DEFAULT_CGROUP_ROOT;
+    }
+    if (socket_path == NULL || socket_path[0] == '\0') {
+        socket_path = DEFAULT_SOCKET_PATH;
+    }
     if (install_signal_handlers() != 0) {
         perror("mypaas-statd: install signal handlers");
         return EXIT_FAILURE;
     }
-
-    printf("mypaas-statd %s bootstrap skeleton\n", MYPAAS_STATD_VERSION);
-    printf("no runtime sampling is implemented yet\n");
-
-    if (g_stop_requested != 0) {
-        return EXIT_SUCCESS;
+    if (statd_registry_init(&registry, cgroup_root) != STATD_SAMPLER_OK) {
+        fprintf(stderr, "mypaas-statd: invalid cgroup root\n");
+        return EXIT_FAILURE;
+    }
+    if (statd_ipc_server_init(&server, &registry, socket_path) != STATD_IPC_OK) {
+        perror("mypaas-statd: initialize unix socket");
+        statd_registry_destroy(&registry);
+        return EXIT_FAILURE;
     }
 
+    printf("mypaas-statd %s listening on %s\n", MYPAAS_STATD_VERSION, socket_path);
+    while (g_stop_requested == 0) {
+        struct timespec now = {0};
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+            perror("mypaas-statd: clock_gettime");
+            break;
+        }
+        if (next_sample_ns == 0U || monotonic_ns(now) >= next_sample_ns) {
+            statd_registry_sample_all(&registry);
+            next_sample_ns = monotonic_ns(now) + SAMPLE_INTERVAL_NS;
+        }
+        if (statd_ipc_server_step(&server, 250) == STATD_IPC_SYSTEM_ERROR) {
+            perror("mypaas-statd: poll");
+            break;
+        }
+    }
+
+    statd_ipc_server_destroy(&server);
+    statd_registry_destroy(&registry);
     return EXIT_SUCCESS;
 }

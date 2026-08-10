@@ -11,32 +11,18 @@ Every implementation phase must ship its tests with the production change. Testi
 Rules:
 - each phase adds a dedicated `make test-phaseN` target;
 - `make test` aggregates the smoke test plus every completed phase target;
-- tests for a phase must cover its documented success, boundary, malformed-input, and failure cases before the phase can be marked complete;
-- deterministic tests are preferred; live-host integration tests are supplementary and must not replace parser/state tests;
-- every completed phase must remain covered by later CI runs to prevent regression;
-- GitHub Actions runs the complete test suite with both GCC and Clang, plus ASan/UBSan and static analysis;
-- a phase is not complete until its implementation and tests are pushed and the corresponding CI run is green;
-- when a bug is found later, add the smallest regression test at the phase/layer where the bug should have been caught.
+- tests for a phase cover documented success, boundary, malformed-input, and failure cases before completion;
+- deterministic tests are preferred; live-host tests are supplementary;
+- every completed phase remains covered by later CI runs;
+- GitHub Actions runs GCC and Clang tests, ASan/UBSan, and static analysis;
+- a phase is complete only after the corresponding remote CI run is green;
+- later bugs receive the smallest regression test at the phase/layer where they should have been caught.
 
-Registry publishing and release packaging are intentionally deferred until the implementation phases are complete and the v0.1 behavior has been validated.
+Registry publishing and release packaging remain deferred until the implementation phases are complete and v0.1 behavior is validated.
 
 ## Phase 0 — Foundation and engineering contracts
 
 **Goal:** establish a safe, boring, reproducible C project before kernel-facing implementation begins.
-
-Scope:
-- C17 Linux-only project skeleton;
-- compiler warnings, sanitizers, static analysis, formatting, CI;
-- `AGENTS.md` and project-specific skills;
-- architecture, cgroup, IPC, and benchmarking contracts;
-- smoke build/test only; no real sampling logic.
-
-Exit criteria:
-- GCC and Clang builds are warning-clean under project flags;
-- smoke tests pass;
-- sanitizer target passes;
-- CI is present;
-- implementation boundaries and v0.1 exclusions are documented.
 
 **Status:** complete.
 
@@ -44,84 +30,51 @@ Exit criteria:
 
 **Goal:** correctly parse all v0.1 kernel text formats without requiring a live cgroup filesystem.
 
-Scope:
-- parse `cpu.stat`;
-- parse `cpu.max` including `max`;
-- parse `memory.current`;
-- parse `memory.max` including `max`;
-- parse `memory.events`;
-- parse `pids.current`;
-- parse `pids.max` including `max`;
-- deterministic fixtures and unit tests.
-
-Constraints:
-- parsers operate on explicit byte/string input and are independent from file I/O;
-- do not calculate CPU percentage yet;
-- do not add sockets, threads, epoll, timers, or registration state;
-- unknown documented future keys may be ignored only where contract-safe;
-- malformed required values must fail explicitly.
-
-Exit criteria:
-- fixtures and tests collectively cover valid, malformed, missing-field, overflow/range, whitespace, unknown-key, duplicate-key, and `max` cases;
-- `make test-phase1` passes under GCC and Clang;
-- `make sanitize` exercises Phase 1 parser tests without ASan/UBSan findings;
-- no live-host dependency in parser tests;
-- GitHub Actions is green for the Phase 1 commit.
-
 **Status:** complete. GCC, Clang, ASan/UBSan, and clang-tidy gates passed for the Phase 1 implementation.
 
 ## Phase 2 — cgroup reader and monotonic sampler
 
-**Status:** in progress until CI validates the implementation commit.
-
 **Goal:** turn validated parsers into a small, correct sampler for explicitly registered cgroup paths.
 
-Scope:
-- safe path validation beneath configured cgroup root;
-- bounded file reads;
-- `CLOCK_MONOTONIC` timestamps;
-- previous/current CPU counter state;
-- CPU usage delta calculation;
-- memory/PID snapshots;
-- latest snapshot storage;
-- registration state with fixed/documented bounds.
+Implemented scope:
+- safe relative path traversal beneath configured cgroup root;
+- fixed 4096-byte controller reads;
+- `CLOCK_MONOTONIC` sampling state;
+- CPU delta/reset handling;
+- memory/PID snapshots and unlimited limits;
+- latest-good snapshot storage plus last sample status;
+- fixed registry bounds.
 
-Constraints:
-- MyPaaS supplies the resolved cgroup path; statd does not infer Docker layout;
-- no IPC server yet beyond test harnesses if useful;
-- prefer simple open/read/close behavior initially; persistent FDs are an optimization only if measurements justify them;
-- no threads unless correctness cannot be achieved simply without them.
-
-Exit criteria:
-- deterministic sampler-state tests cover first sample, subsequent sample, counter regression/reset, zero/short elapsed interval, disappearing cgroup, and unlimited limits;
-- live Linux integration test can sample a controlled cgroup when the environment permits;
-- `make test-phase2` is included by `make test`;
-- sanitizer clean;
-- GitHub Actions is green for the Phase 2 commit.
+**Status:** complete. GCC, Clang, ASan/UBSan, and clang-tidy gates passed for the Phase 2 implementation.
 
 ## Phase 3 — Unix socket protocol v1
 
 **Goal:** expose latest snapshots safely to the local MyPaaS control plane.
 
-Scope:
-- AF_UNIX + SOCK_STREAM server at configured path;
-- protocol handshake/versioning;
-- register, unregister, snapshot, and basic status operations as documented in `IPC_PROTOCOL.md`;
-- bounded clients and messages;
-- partial read/write handling;
-- clean disconnect and malformed-request handling.
+Implemented scope awaiting CI gate:
+- AF_UNIX + SOCK_STREAM pathname server;
+- nonblocking fixed-slot `poll()` loop;
+- hello/protocol negotiation;
+- register, unregister, snapshot, and status operations;
+- 8 KiB input and 4 KiB output bounds per client;
+- partial reads/writes and multiple messages per stream;
+- malformed/oversized/disconnected client isolation;
+- socket mode `0600` and cleanup;
+- daemon runtime loop with independent periodic sampling.
 
-Constraints:
-- start with the simplest correct connection model;
-- do not add epoll unless the simple model demonstrably fails the expected client workload or would require an undesirable thread-per-client model;
-- no HTTP/gRPC/protobuf/shared memory.
+Constraints retained:
+- no epoll because eight clients do not justify it;
+- no threads;
+- no HTTP/gRPC/protobuf/shared memory;
+- snapshot requests never trigger a full metrics sweep.
 
 Exit criteria:
-- protocol integration tests cover fragmentation, multiple messages, oversized input, malformed JSON, unsupported version/op, disconnects, and slow/broken clients;
-- daemon remains alive after client protocol errors;
-- socket permissions and cleanup behavior are tested;
-- `make test-phase3` is included by `make test`;
-- GitHub Actions is green for the Phase 3 commit.
+- `make test-phase3` covers fragmentation, multiple messages, oversized input, malformed request, unsupported version, handshake requirement, disconnect isolation, socket permissions/cleanup, registration, and snapshot response;
+- all previous phase tests remain green;
+- sanitizer clean;
+- GitHub Actions green.
+
+**Status:** in progress until remote CI validates the implementation commit.
 
 ## Phase 4 — MyPaaS integration and baseline comparison
 
@@ -130,18 +83,18 @@ Exit criteria:
 Scope:
 - Go-side client in MyPaaS;
 - registration lifecycle integration;
-- fallback/error behavior defined explicitly;
+- fallback/error behavior;
 - benchmark current Docker CLI metrics path versus optimized Go/runtime path versus statd where practical;
-- operational systemd service/release packaging.
+- operational systemd service/release packaging, but no registry publishing yet.
 
 Exit criteria:
 - end-to-end metrics appear correctly in MyPaaS;
-- container/project lifecycle does not leak registrations;
-- daemon restart/reconnect behavior is defined and tested;
-- integration tests cover the Go ↔ statd contract and failure/reconnect behavior;
-- benchmark report records CPU, RSS, latency, syscall/process cost, and metric freshness;
-- statd provides a meaningful measured benefit or the integration is reconsidered;
-- GitHub Actions is green for the Phase 4 integration changes.
+- lifecycle does not leak registrations;
+- restart/reconnect behavior is tested;
+- integration tests cover Go ↔ statd contract and failures;
+- benchmark records CPU, RSS, latency, syscall/process cost, and freshness;
+- statd provides meaningful measured benefit or integration is reconsidered;
+- GitHub Actions green for integration changes.
 
 ## Phase 5 — Mature v0.1 hardening
 
@@ -153,7 +106,7 @@ Scope only as evidence requires:
 - long-running soak test;
 - packaging checks;
 - compatibility documentation;
-- small performance improvements supported by benchmark evidence.
+- benchmark-supported small performance improvements.
 
 Exit criteria:
 - long-running test shows bounded memory/FD behavior;
@@ -171,9 +124,9 @@ Potential later work includes IO metrics, PSI, OOM notifications, health probing
 For every task:
 1. identify the active phase;
 2. implement the smallest change needed for that phase;
-3. write/update the phase tests in the same change;
+3. write/update phase tests in the same change;
 4. do not create abstractions solely for future phases;
-5. satisfy the current exit criteria;
-6. require green CI before marking the phase complete;
-7. benchmark only claims that are performance-related;
-8. prefer deleting unnecessary complexity over preserving it for hypothetical reuse.
+5. satisfy current exit criteria;
+6. require green CI before marking complete;
+7. benchmark only performance claims;
+8. prefer deleting unnecessary complexity over hypothetical reuse.
