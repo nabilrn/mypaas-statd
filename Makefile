@@ -71,7 +71,8 @@ test-packaging: all
 	bash tests/test_packaging.sh
 
 test-benchmark-harness:
-	python3 -m py_compile benchmarks/compare.py
+	python3 -m py_compile benchmarks/compare.py benchmarks/test_compare.py
+	python3 -m unittest benchmarks.test_compare
 
 install: all
 	$(INSTALL) -Dm0755 $(BIN) $(DESTDIR)$(PREFIX)/bin/mypaas-statd
