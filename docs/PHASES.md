@@ -44,7 +44,7 @@ No `epoll`, threads, HTTP, gRPC, protobuf, shared memory, or generic framework w
 
 ## Phase 4 — MyPaaS integration and baseline comparison
 
-**Status:** implementation complete; validation blocked only on real-host benchmark evidence.
+**Status:** complete; real-host performance gate accepted and MyPaaS integration merged.
 
 Completed statd-side work:
 - production PID registration resolves cgroup v2 membership from `/proc/<pid>/cgroup` using the documented unified entry;
@@ -72,20 +72,20 @@ Intentional lifecycle choice:
 - statd self-evicts only registrations whose required cgroup files are actually gone;
 - this keeps lifecycle coupling small and recovers even if the Go control plane crashes.
 
-Remaining Phase 4 gate:
-1. install/run statd on the real MyPaaS VM;
-2. execute `benchmarks/compare.py` under representative workloads;
-3. record repeated latency/CPU/RSS/freshness observations;
-4. confirm that the measured benefit justifies the additional host daemon;
-5. only then mark Phase 4 complete and merge/enable the MyPaaS integration.
+Accepted Phase 4 evidence:
+- real Debian 13 + Podman host benchmark evidence is preserved under `benchmarks/results/`;
+- repeated trials compare Docker-compatible CLI metrics against statd protocol v1;
+- correctness was validated against raw cgroup v2 files;
+- statd stop/restart/disappearance behavior was exercised through the MyPaaS integration;
+- MyPaaS PR #15 merged the opt-in statd client and fallback behavior.
 
 The benchmark harness itself is not evidence. GitHub-hosted CI performance is not accepted as a substitute for the target VM.
 
 ## Phase 5 — Mature v0.1 hardening
 
-**Status:** blocked by Phase 4 benchmark gate.
+**Status:** active.
 
-Do not start Phase 5 merely because the implementation compiles. Once Phase 4 is accepted, Phase 5 may add only evidence-driven hardening such as:
+Phase 5 may add only evidence-driven hardening such as:
 - bounded long-running/FD behavior checks;
 - graceful restart/soak validation;
 - packaging compatibility checks;
