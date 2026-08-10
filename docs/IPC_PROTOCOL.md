@@ -44,15 +44,16 @@ A protocol mismatch returns an explicit unsupported-protocol error.
 
 Conceptual request:
 ```json
-{"op":"register","id":"runtime-id","service":"api","cgroup":"/sys/fs/cgroup/..."}
+{"op":"register","id":"runtime-id","service":"api","cgroup":"system.slice/runtime.scope"}
 ```
 
 Requirements:
 - all strings bounded;
 - `id` is the stable lookup key supplied by MyPaaS;
 - `service` is presentation metadata only;
-- cgroup path is validated under configured cgroup root;
-- duplicate-ID replacement/update semantics must be decided and tested before implementation.
+- `cgroup` is a path relative to statd's configured cgroup root, never an arbitrary absolute host path;
+- Phase 2 path validation rejects absolute paths, `.`/`..`, empty path components, and symlink traversal;
+- v0.1 duplicate IDs are rejected rather than implicitly replacing the active registration.
 
 ## unregister
 
@@ -60,7 +61,7 @@ Requirements:
 {"op":"unregister","id":"runtime-id"}
 ```
 
-Operation is idempotent unless later contract requirements say otherwise.
+Operation is idempotent in v0.1.
 
 ## snapshot
 

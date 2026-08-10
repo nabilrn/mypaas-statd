@@ -68,9 +68,11 @@ Exit criteria:
 - no live-host dependency in parser tests;
 - GitHub Actions is green for the Phase 1 commit.
 
-**Status:** in progress until CI validates the implementation commit.
+**Status:** complete. GCC, Clang, ASan/UBSan, and clang-tidy gates passed for the Phase 1 implementation.
 
 ## Phase 2 — cgroup reader and monotonic sampler
+
+**Status:** in progress until CI validates the implementation commit.
 
 **Goal:** turn validated parsers into a small, correct sampler for explicitly registered cgroup paths.
 

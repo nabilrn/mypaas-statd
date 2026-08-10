@@ -18,21 +18,32 @@ MyPaaS Go control plane
  Linux cgroup v2
 ```
 
-The control plane resolves runtime identity and supplies a validated registration request containing a stable runtime identifier, service label, and cgroup path. statd independently enforces that the path remains inside its configured cgroup root.
+The control plane resolves runtime identity and supplies a stable runtime identifier plus a cgroup path relative to statd's configured cgroup root. statd independently enforces that path components stay beneath the root.
 
 ## Components
 
 ### IPC server
 Accepts local clients, validates bounded protocol messages, performs registration/unregistration/snapshot operations, and serializes responses. It must never trigger a full synchronous metrics sweep solely because a dashboard requested a snapshot.
 
+Implementation begins in Phase 3.
+
 ### Registry
-Stores a bounded set of runtime registrations. Each entry owns identifying metadata, validated cgroup path, previous CPU sample state, and latest metric snapshot.
+Phase 2 uses a fixed-capacity registry of 64 runtime entries with runtime IDs limited to 127 bytes. Each active entry owns one safely opened cgroup directory file descriptor, previous CPU sample state, and the latest successful snapshot. No heap-backed dynamically growing registry is required for v0.1.
+
+Duplicate registration IDs are rejected rather than silently replaced. Unregister is idempotent. These semantics remain subject to the Phase 3 protocol contract.
+
+### cgroup reader
+The configured cgroup root is trusted administrator configuration. Runtime cgroup paths are relative to that root. statd opens each path component with `openat()` plus `O_DIRECTORY`, `O_NOFOLLOW`, and `O_CLOEXEC`; absolute paths, `.`/`..`, empty components, and symlink components are rejected. This avoids guessing Docker-specific filesystem layout and avoids pathname traversal through symlinks.
+
+Controller files are opened relative to the already validated cgroup directory. Each file is read with a fixed 4096-byte bound and closed after the sample. Persistent per-controller file descriptors are not introduced without measurement.
 
 ### Sampler
-Runs at a configured interval (initial target: 1000 ms). It reads registered cgroup controller files, computes deltas from monotonic time, and atomically/logically replaces each entry's latest snapshot.
+The sampler reads one registered cgroup snapshot, timestamps it with `CLOCK_MONOTONIC`, and computes CPU utilization from consecutive `usage_usec` samples. The first sample, a non-positive elapsed interval, or a regressed CPU counter establishes a new baseline and reports CPU percentage as unavailable for that sample.
+
+The Phase 2 API is explicitly tick-driven; the daemon's periodic scheduling loop is added only when the runtime server is assembled. This keeps sampler state deterministic and unit-testable.
 
 ### Parsers
-Pure/bounded functions for controller text. Parser tests use fixtures and do not require a live cgroup hierarchy.
+Pure bounded functions parse controller text without file I/O or heap allocation. Parser tests use deterministic fixtures and do not require a live cgroup hierarchy.
 
 ## Data flow
 
@@ -40,12 +51,12 @@ Pure/bounded functions for controller text. Parser tests use fixtures and do not
 register runtime
     |
     v
-validate path under cgroup root
+open relative cgroup path safely beneath root
     |
     v
-registry entry
+fixed registry entry + cgroup dir fd
     |
- periodic sampler
+ sampler tick
     |
     +--> cpu.stat / cpu.max
     +--> memory.current / memory.max / memory.events
@@ -54,28 +65,26 @@ registry entry
     v
 latest snapshot
     |
- snapshot request
+ snapshot request (Phase 3)
     v
 Unix socket response
 ```
 
 ## Failure isolation
 
-One malformed/disappeared cgroup must not crash the daemon or invalidate unrelated registrations. Sampling errors are represented per runtime and can be recovered on later intervals.
+One malformed/disappeared cgroup must not crash the daemon or invalidate unrelated registrations. A failed read does not replace the last good snapshot with believable zeroes.
 
 A malformed client message terminates or rejects that request/client according to protocol rules; it must not terminate the daemon.
 
 ## Resource bounds
 
-Exact defaults will be constants/config with tests, but the design requires explicit limits for:
-- maximum registrations;
-- maximum simultaneous clients;
-- maximum IPC message bytes;
-- maximum identifier/service/path lengths;
-- maximum controller file bytes;
-- output buffer size.
+Current v0.1 bounds established by Phase 2:
+- maximum registrations: 64;
+- maximum runtime ID bytes: 127;
+- maximum relative cgroup path bytes: 4096;
+- maximum controller file bytes: 4096.
 
-No network listener is required.
+Phase 3 will establish explicit client/message/output limits before the IPC server is considered complete. No network listener is required.
 
 ## Future expansion
 

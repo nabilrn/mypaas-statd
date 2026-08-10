@@ -6,11 +6,12 @@ LDFLAGS ?=
 LDLIBS ?=
 
 BIN := build/mypaas-statd
-PROD_SRC := src/main.c src/cgroup_parse.c
+PROD_SRC := src/main.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c
 SMOKE_BIN := build/test_smoke
-PARSER_TEST_BIN := build/test_cgroup_parse
+PHASE1_TEST_BIN := build/test_cgroup_parse
+PHASE2_TEST_BIN := build/test_sampler
 
-.PHONY: all clean test test-phase1 sanitize lint format verify
+.PHONY: all clean test test-phase1 test-phase2 sanitize lint format verify
 
 all: $(BIN)
 
@@ -23,21 +24,37 @@ $(BIN): $(PROD_SRC) | build
 $(SMOKE_BIN): tests/test_smoke.c | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 $< -o $@
 
-$(PARSER_TEST_BIN): tests/test_cgroup_parse.c src/cgroup_parse.c include/cgroup_parse.h | build
+$(PHASE1_TEST_BIN): tests/test_cgroup_parse.c src/cgroup_parse.c include/cgroup_parse.h | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_cgroup_parse.c src/cgroup_parse.c -o $@
 
-test: $(SMOKE_BIN) test-phase1
+$(PHASE2_TEST_BIN): tests/test_sampler.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c \
+		include/cgroup_parse.h include/cgroup_reader.h include/sampler.h | build
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_sampler.c src/cgroup_parse.c \
+		src/cgroup_reader.c src/sampler.c -lm -o $@
+
+test: $(SMOKE_BIN) test-phase1 test-phase2
 	./$(SMOKE_BIN)
 
-test-phase1: $(PARSER_TEST_BIN)
-	./$(PARSER_TEST_BIN)
+test-phase1: $(PHASE1_TEST_BIN)
+	./$(PHASE1_TEST_BIN)
+
+test-phase2: $(PHASE2_TEST_BIN)
+	./$(PHASE2_TEST_BIN)
 
 sanitize: | build
-	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer -fsanitize=address,undefined $(PROD_SRC) -o build/mypaas-statd-sanitize
-	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer -fsanitize=address,undefined tests/test_smoke.c -o build/test-smoke-sanitize
-	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer -fsanitize=address,undefined tests/test_cgroup_parse.c src/cgroup_parse.c -o build/test-cgroup-parse-sanitize
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
+		-fsanitize=address,undefined $(PROD_SRC) -o build/mypaas-statd-sanitize
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
+		-fsanitize=address,undefined tests/test_smoke.c -o build/test-smoke-sanitize
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
+		-fsanitize=address,undefined tests/test_cgroup_parse.c src/cgroup_parse.c \
+		-o build/test-cgroup-parse-sanitize
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
+		-fsanitize=address,undefined tests/test_sampler.c src/cgroup_parse.c src/cgroup_reader.c \
+		src/sampler.c -lm -o build/test-sampler-sanitize
 	./build/test-smoke-sanitize
 	./build/test-cgroup-parse-sanitize
+	./build/test-sampler-sanitize
 
 lint:
 	@command -v clang-tidy >/dev/null 2>&1 || { echo "clang-tidy not installed"; exit 1; }
