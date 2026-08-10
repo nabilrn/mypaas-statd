@@ -6,7 +6,9 @@ Its job is intentionally narrow: sample cgroup v2 runtime counters with low over
 
 ## Status
 
-Bootstrap phase. The repository currently defines architecture, engineering constraints, protocol direction, build hygiene, and a compile-clean C17 skeleton. cgroup parsing and runtime registration are intentionally deferred until the contracts in `docs/` are implemented with fixtures and tests.
+Phases 0–3 are complete and CI-gated. Phase 4 integration is implemented through the MyPaaS statd client branch, host PID-based cgroup resolution, optional production socket wiring, systemd packaging, and a real-host benchmark harness.
+
+Phase 4 is **not considered complete yet** because the performance acceptance gate requires benchmark evidence from the actual MyPaaS VM. GitHub Actions validates correctness and build hygiene; it is not used to manufacture production latency claims.
 
 ## v0.1 scope
 
@@ -16,16 +18,18 @@ Bootstrap phase. The repository currently defines architecture, engineering cons
 - persistent sampler
 - CPU, memory, and PID metrics
 - Unix domain socket IPC
-- bounded memory usage
-- systemd-friendly foreground daemon
+- bounded memory/client/registration state
+- host PID → cgroup v2 resolution through `/proc/<pid>/cgroup`
+- systemd-hosted foreground daemon
+- MyPaaS Docker-metrics fallback during rollout
 
 ## Explicit non-goals for v0.1
 
 - eBPF
 - io_uring
 - shared-memory IPC
-- Docker CLI or Docker SDK integration
-- container lifecycle management
+- Docker CLI or Docker SDK inside statd
+- container lifecycle management inside statd
 - HTTP server
 - health probing
 - log collection
@@ -40,4 +44,12 @@ make sanitize
 make lint
 ```
 
-Read `AGENTS.md` before making changes. Kernel-facing behavior must be verified against the Linux interface being used; do not implement cgroup/procfs/socket semantics from memory alone.
+Staged installation is also covered by `make test`:
+
+```bash
+sudo make install
+```
+
+Operational setup is documented in `docs/OPERATIONS.md`. Benchmark methodology is in `docs/BENCHMARKING.md`.
+
+Read `AGENTS.md` before making changes. Kernel-facing behavior must be verified against the Linux interface being used; do not implement cgroup/procfs/socket semantics from memory alone. Prefer the simplest mature implementation that satisfies the measured workload.
