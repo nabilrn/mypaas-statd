@@ -1,92 +1,72 @@
-# cgroup v2 Metric Contract
+# cgroup v2 Metric and Resolution Contract
 
-This document defines the project-level metric semantics. Before implementing parsers, verify each file/field against authoritative current Linux cgroup v2 documentation available in the development environment. If Linux semantics conflict with this document, stop and update the contract deliberately rather than silently coding around it.
+This document defines project-level semantics. Kernel-facing changes must be verified against authoritative Linux documentation/man-pages. If current kernel documentation conflicts with this contract, update the contract deliberately before coding.
 
-## Root and paths
+## Roots and runtime location
 
 Default cgroup root: `/sys/fs/cgroup`.
+Default proc root: `/proc`.
 
-The MyPaaS control plane supplies a cgroup path. statd must canonicalize/validate it and ensure the resulting target cannot escape the configured root through `..`, absolute-path substitution, or symlink traversal.
+A registration supplies exactly one of:
+- a path relative to the configured cgroup root; or
+- a positive host PID.
 
-statd must not infer Docker-specific cgroup directory layouts.
+For PID registration, statd reads `/proc/<pid>/cgroup` from its host proc namespace. The unified cgroup-v2 membership entry is identified by hierarchy ID `0` with empty controllers (`0::$PATH`). statd strips the leading `/` and then applies the ordinary safe relative cgroup-path validation.
+
+A missing PID/unified entry or a cgroup entry marked deleted is not converted into a guessed path. Multiple unified entries are treated as malformed. A resolved root path `/` is rejected for v0.1 runtime registrations because MyPaaS is expected to register isolated container cgroups rather than the host root cgroup.
+
+statd never guesses Docker/systemd cgroup directory naming.
+
+## Safe cgroup path access
+
+The configured cgroup root is administrator configuration. Runtime relative paths:
+- must not be absolute;
+- must not contain empty, `.` or `..` components;
+- are traversed component-by-component with no-follow directory opens;
+- must not escape through symlinks.
+
+Controller files are opened relative to the validated cgroup directory.
 
 ## CPU
 
-Files targeted for v0.1:
-- `cpu.stat`
-- `cpu.max`
+v0.1 reads `cpu.stat` and `cpu.max`.
 
-Required CPU-time source: `usage_usec` from `cpu.stat`.
+Required time counter: `usage_usec` from `cpu.stat`. It is cumulative, not a percentage. Other valid keys may be ignored.
 
-`usage_usec` is a cumulative counter, not a utilization percentage. Other current or future flat-keyed `cpu.stat` fields are not required by v0.1 and may be ignored after the line shape is validated.
-
-For consecutive valid samples:
-
+For consecutive samples:
 ```text
 usage_delta_usec = current_usage_usec - previous_usage_usec
 elapsed_usec = monotonic_now - previous_monotonic_time
 raw_cpu_percent = usage_delta_usec / elapsed_usec * 100
 ```
 
-A workload using two CPUs fully may report near 200% in raw utilization. Do not clamp collector output to 100% merely for UI convenience.
+Multi-CPU workloads can exceed 100%; collector output is not clamped. First sample, identity replacement, counter regression, or invalid elapsed interval establishes a new baseline.
 
-If the cumulative counter decreases or the registration identity is replaced, discard the delta and establish a new baseline.
-
-`cpu.max` contains quota and period as two tokens. The quota token may be `max`; `max` means no limit and must remain an explicit state rather than a fabricated integer.
+`cpu.max` has quota + period; quota may be literal `max`, which remains an explicit unlimited state.
 
 ## Memory
 
-Files:
-- `memory.current`
-- `memory.max`
-- `memory.events`
+Files: `memory.current`, `memory.max`, `memory.events`.
 
-`memory.current`: current memory usage in bytes.
-
-`memory.max`: memory hard limit in bytes or literal `max`. Unlimited is represented explicitly.
-
-`memory.events`: read-only flat-keyed cumulative event counters. The counters are hierarchical for the cgroup subtree. v0.1 records:
-- `oom`: number of times an allocation was about to fail because of memory limit conditions described by the kernel interface;
-- `oom_kill`: number of processes belonging to the cgroup killed by an OOM killer.
-
-Both keys are required for a valid v0.1 `memory.events` sample. Unknown additional keys are ignored so new kernel counters do not break statd. A duplicate required key is treated as malformed input rather than guessed.
+- `memory.current`: current bytes.
+- `memory.max`: hard limit bytes or `max`.
+- `memory.events`: flat-keyed cumulative events. v0.1 requires `oom` and `oom_kill`; unknown additional keys are ignored and duplicate required keys are malformed.
 
 ## PIDs
 
-Files:
-- `pids.current`
-- `pids.max`
+Files: `pids.current`, `pids.max`.
 
-`pids.current`: current number accounted by the pids controller for the cgroup and its descendants according to kernel semantics.
-
-`pids.max`: numeric hard limit or literal `max`. Unlimited is represented explicitly.
+- `pids.current`: current count according to pids-controller semantics.
+- `pids.max`: numeric hard limit or `max`.
 
 ## Parser contract
 
-Phase 1 parsers:
-- consume explicit `(pointer, length)` input;
-- perform no file I/O and no heap allocation;
-- do not assume NUL termination;
-- use unsigned 64-bit storage for kernel counters/byte values and reject decimal overflow;
-- accept surrounding ASCII whitespace where kernel text interfaces commonly include a trailing newline;
-- reject extra tokens for single/two-value interfaces;
-- distinguish malformed input, missing required keys, and numeric range overflow.
-
-## Optional future sources
-
-Not part of initial implementation unless explicitly promoted:
-- `io.stat`
-- `cpu.pressure`
-- `memory.pressure`
-- `io.pressure`
-- `memory.peak`
+Pure parsers consume explicit `(pointer,length)` data, perform no heap allocation/I/O, do not assume NUL termination, store counters as unsigned 64-bit values, reject overflow/malformed required values, and preserve `max` distinctly from numeric zero.
 
 ## Snapshot validity
 
-Each snapshot needs collection time based on monotonic sampling state and an explicit health/validity state. Do not replace a failed read with a believable zero.
+Sampling failures are not zero. A snapshot records whether data exists and whether the latest sample failed. A previous good sample may be returned stale; a runtime with no successful sample reports metrics unavailable.
 
-Examples:
-- zero memory usage can be a valid numeric reading;
-- unavailable memory data is a different state;
-- first CPU sample has no utilization delta yet;
-- disappeared cgroup is not equivalent to 0% CPU / 0 bytes memory.
+## Future sources
+
+Not v0.1 unless explicitly promoted: `io.stat`, PSI files, `memory.peak`, eBPF/process events.
