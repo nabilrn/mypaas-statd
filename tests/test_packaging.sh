@@ -15,6 +15,7 @@ test -f "$unit"
 
 grep -Fq 'ExecStart=/usr/local/bin/mypaas-statd' "$unit"
 grep -Fq 'RuntimeDirectory=mypaas' "$unit"
+grep -Fq 'RuntimeDirectoryPreserve=yes' "$unit"
 grep -Fq 'Environment=MYPAAS_STATD_SOCKET=/run/mypaas/statd.sock' "$unit"
 grep -Fq 'ProtectControlGroups=yes' "$unit"
 grep -Fq 'RestrictAddressFamilies=AF_UNIX' "$unit"

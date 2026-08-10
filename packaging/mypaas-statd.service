@@ -10,6 +10,7 @@ Restart=on-failure
 RestartSec=2s
 RuntimeDirectory=mypaas
 RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 Environment=MYPAAS_STATD_CGROUP_ROOT=/sys/fs/cgroup
 Environment=MYPAAS_STATD_SOCKET=/run/mypaas/statd.sock
 
