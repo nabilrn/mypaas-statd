@@ -7,6 +7,8 @@ LDLIBS ?=
 PREFIX ?= /usr/local
 SYSTEMD_UNIT_DIR ?= $(PREFIX)/lib/systemd/system
 INSTALL ?= install
+VERSION ?=
+DIST_DIR ?= dist
 
 BIN := build/mypaas-statd
 PROD_SRC := src/main.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c src/proc_cgroup.c src/ipc.c
@@ -17,7 +19,7 @@ PHASE3_TEST_BIN := build/test_ipc
 PHASE4_TEST_BIN := build/test_proc_cgroup
 PHASE4_EVICTION_BIN := build/test_eviction
 
-.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-packaging test-benchmark-harness sanitize lint format verify install
+.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-packaging test-release-package test-benchmark-harness sanitize lint format verify install package
 
 all: $(BIN)
 
@@ -51,7 +53,7 @@ $(PHASE4_EVICTION_BIN): tests/test_eviction.c src/cgroup_parse.c src/cgroup_read
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_eviction.c src/cgroup_parse.c \
 		src/cgroup_reader.c src/sampler.c -lm -o $@
 
-test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-packaging test-benchmark-harness
+test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-packaging test-release-package test-benchmark-harness
 	./$(SMOKE_BIN)
 
 test-phase1: $(PHASE1_TEST_BIN)
@@ -73,6 +75,9 @@ test-phase5: all
 test-packaging: all
 	bash tests/test_packaging.sh
 
+test-release-package: all
+	bash tests/test_release_packaging.sh
+
 test-benchmark-harness:
 	python3 -m py_compile benchmarks/compare.py benchmarks/test_compare.py
 	python3 -m unittest benchmarks.test_compare
@@ -80,6 +85,10 @@ test-benchmark-harness:
 install: all
 	$(INSTALL) -Dm0755 $(BIN) $(DESTDIR)$(PREFIX)/bin/mypaas-statd
 	$(INSTALL) -Dm0644 packaging/mypaas-statd.service $(DESTDIR)$(SYSTEMD_UNIT_DIR)/mypaas-statd.service
+
+package: all
+	@test -n "$(VERSION)" || { echo "VERSION is required, for example: make package VERSION=v0.1.0" >&2; exit 2; }
+	OUT_DIR="$(DIST_DIR)" bash packaging/package-release.sh "$(VERSION)"
 
 sanitize: | build
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
@@ -122,4 +131,4 @@ format:
 verify: clean all test sanitize lint
 
 clean:
-	rm -rf build
+	rm -rf build dist
