@@ -1,0 +1,70 @@
+name: Bootstrap v0.1.0
+
+on:
+  push:
+    branches:
+      - "release/bootstrap-v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RELEASE_VERSION: v0.1.0
+      RELEASE_TARGET_SHA: 2977e9ee096095f3155bd3accf48c78f1f09410a
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TARGET_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard immutable release target
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_TARGET_SHA"
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_VERSION already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+      - name: Install static analysis dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy
+
+      - name: Verify release source
+        env:
+          CC: clang
+        run: make verify
+
+      - name: Build optimized release binary
+        env:
+          CC: clang
+        run: |
+          make clean
+          make all
+
+      - name: Build and verify versioned package
+        env:
+          CC: clang
+        run: |
+          make package VERSION="$RELEASE_VERSION"
+          cd dist
+          sha256sum -c SHA256SUMS
+          test "$(tar -xOf mypaas-statd-linux-amd64.tar.gz VERSION)" = "$RELEASE_VERSION"
+
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_VERSION" \
+            dist/mypaas-statd-linux-amd64.tar.gz \
+            dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_TARGET_SHA" \
+            --title "mypaas-statd $RELEASE_VERSION" \
+            --generate-notes
