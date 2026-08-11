@@ -131,4 +131,4 @@ format:
 verify: clean all test sanitize lint
 
 clean:
-	rm -rf build dist
+	rm -rf build "$(DIST_DIR)"
