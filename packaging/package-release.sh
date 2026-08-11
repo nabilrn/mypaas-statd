@@ -10,7 +10,7 @@ if [[ -z "$version" ]]; then
   echo "usage: $0 <version>" >&2
   exit 2
 fi
-if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$ ]]; then
+if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9._-]*)?$ ]]; then
   echo "version must look like v0.1.0 or v0.1.0-rc.1" >&2
   exit 2
 fi
@@ -19,12 +19,18 @@ if [[ ! -x "$binary" ]]; then
   exit 1
 fi
 
-case "$(uname -m)" in
+os="$(uname -s)"
+machine="$(uname -m)"
+if [[ "$os" != "Linux" ]]; then
+  echo "unsupported release host: ${os}/${machine}; v0.1 packaging currently supports linux-amd64 only" >&2
+  exit 1
+fi
+case "$machine" in
   x86_64|amd64)
     arch="amd64"
     ;;
   *)
-    echo "unsupported release host architecture: $(uname -m); v0.1 packaging currently supports linux-amd64 only" >&2
+    echo "unsupported release host: ${os}/${machine}; v0.1 packaging currently supports linux-amd64 only" >&2
     exit 1
     ;;
 esac
