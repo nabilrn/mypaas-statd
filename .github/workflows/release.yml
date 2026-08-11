@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-linux-amd64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install static analysis dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy
+
+      - name: Verify release source
+        env:
+          CC: clang
+        run: make verify
+
+      - name: Build optimized release binary
+        env:
+          CC: clang
+        run: |
+          make clean
+          make all
+
+      - name: Build versioned release package
+        env:
+          CC: clang
+        run: make package VERSION="${GITHUB_REF_NAME}"
+
+      - name: Verify packaged checksum
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/mypaas-statd-linux-amd64.tar.gz \
+            dist/SHA256SUMS \
+            --title "mypaas-statd ${GITHUB_REF_NAME}" \
+            --generate-notes
