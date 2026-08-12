@@ -8,7 +8,7 @@ Development is incremental: implementation, tests, sanitizers, static analysis, 
 - `make test` retains all completed phase regression tests;
 - GitHub Actions validates GCC, Clang, ASan/UBSan, and clang-tidy;
 - deterministic correctness checks run in CI; production performance claims require the target host;
-- registry publishing stays deferred until v0.1 is hardened.
+- release publishing occurs only from a verified release source.
 
 ## Phase 0 — Foundation
 
@@ -81,18 +81,47 @@ Accepted Phase 4 evidence:
 
 The benchmark harness itself is not evidence. GitHub-hosted CI performance is not accepted as a substitute for the target VM.
 
-## Phase 5 — Mature v0.1 hardening
+## Phase 5 — Mature v0.1 hardening and release
+
+**Status:** complete; v0.1.0 published.
+
+Completed evidence-driven hardening includes:
+- bounded long-running/FD behavior checks;
+- graceful shutdown/restart validation;
+- disappeared-cgroup eviction through the normal sampling loop;
+- packaging compatibility checks;
+- a versioned Linux amd64 release package with checksum verification;
+- a tag-triggered verified GitHub Release workflow.
+
+The published v0.1.0 source is the accepted release baseline for future compatibility work.
+
+## Phase 6 — Host storage and network telemetry
 
 **Status:** active.
 
-Phase 5 may add only evidence-driven hardening such as:
-- bounded long-running/FD behavior checks;
-- graceful restart/soak validation;
-- packaging compatibility checks;
-- measured small optimizations if needed;
-- final release artifact workflow.
+Goal: add the smallest mature host-level telemetry contract needed by the MyPaaS workspace dashboard without turning statd into a general monitoring agent.
 
-Registry/GitHub Release publishing remains deferred until this phase is complete.
+Phase 6 scope:
+- root-filesystem total and available bytes using `statvfs(3)`;
+- IPv4 default-route interface selection from bounded `/proc/net/route` rows;
+- cumulative RX/TX byte counters from `/sys/class/net/<iface>/statistics/`;
+- independent validity for storage and network sections;
+- deterministic fixtures/tests for route selection, counters, malformed/unavailable sources, and bounds;
+- additive protocol-v1 exposure in a later Phase 6 slice after the host readers are green;
+- MyPaaS control-plane integration only after the statd wire contract is tested.
+
+Explicitly out of scope for Phase 6:
+- eBPF;
+- packet capture;
+- traffic control;
+- netlink-based per-container accounting;
+- Docker/Podman API calls from statd;
+- per-project network usage;
+- filesystem/volume scanning;
+- time-series persistence;
+- a general host monitoring agent.
+
+The host-reader semantics are documented in `docs/HOST_TELEMETRY.md`.
 
 ## Phase discipline
 
