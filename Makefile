@@ -11,15 +11,16 @@ VERSION ?=
 DIST_DIR ?= dist
 
 BIN := build/mypaas-statd
-PROD_SRC := src/main.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c src/proc_cgroup.c src/ipc.c
+PROD_SRC := src/main.c src/cgroup_parse.c src/cgroup_reader.c src/sampler.c src/proc_cgroup.c src/ipc.c src/host_metrics.c
 SMOKE_BIN := build/test_smoke
 PHASE1_TEST_BIN := build/test_cgroup_parse
 PHASE2_TEST_BIN := build/test_sampler
 PHASE3_TEST_BIN := build/test_ipc
 PHASE4_TEST_BIN := build/test_proc_cgroup
 PHASE4_EVICTION_BIN := build/test_eviction
+PHASE6_HOST_TEST_BIN := build/test_host_metrics
 
-.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-packaging test-release-package test-benchmark-harness sanitize lint format verify install package
+.PHONY: all clean test test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-phase6 test-packaging test-release-package test-benchmark-harness sanitize lint format verify install package
 
 all: $(BIN)
 
@@ -53,7 +54,10 @@ $(PHASE4_EVICTION_BIN): tests/test_eviction.c src/cgroup_parse.c src/cgroup_read
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_eviction.c src/cgroup_parse.c \
 		src/cgroup_reader.c src/sampler.c -lm -o $@
 
-test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-packaging test-release-package test-benchmark-harness
+$(PHASE6_HOST_TEST_BIN): tests/test_host_metrics.c src/host_metrics.c include/host_metrics.h | build
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O0 -g3 tests/test_host_metrics.c src/host_metrics.c -o $@
+
+test: $(SMOKE_BIN) test-phase1 test-phase2 test-phase3 test-phase4 test-phase5 test-phase6 test-packaging test-release-package test-benchmark-harness
 	./$(SMOKE_BIN)
 
 test-phase1: $(PHASE1_TEST_BIN)
@@ -71,6 +75,9 @@ test-phase4: $(PHASE4_TEST_BIN) $(PHASE4_EVICTION_BIN)
 
 test-phase5: all
 	python3 tests/test_phase5_process.py
+
+test-phase6: $(PHASE6_HOST_TEST_BIN)
+	./$(PHASE6_HOST_TEST_BIN)
 
 test-packaging: all
 	bash tests/test_packaging.sh
@@ -111,6 +118,9 @@ sanitize: | build
 		-fsanitize=address,undefined tests/test_eviction.c src/cgroup_parse.c src/cgroup_reader.c \
 		src/sampler.c -lm -o build/test-eviction-sanitize
 	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
+		-fsanitize=address,undefined tests/test_host_metrics.c src/host_metrics.c \
+		-o build/test-host-metrics-sanitize
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -O1 -g3 -fno-omit-frame-pointer \
 		-fsanitize=address,undefined $(PROD_SRC) -o build/mypaas-statd
 	./build/test-smoke-sanitize
 	./build/test-cgroup-parse-sanitize
@@ -118,6 +128,7 @@ sanitize: | build
 	./build/test-ipc-sanitize
 	./build/test-proc-cgroup-sanitize
 	./build/test-eviction-sanitize
+	./build/test-host-metrics-sanitize
 	python3 tests/test_phase5_process.py
 
 lint:
