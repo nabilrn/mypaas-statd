@@ -15,7 +15,7 @@ If one source is unavailable, the other may still be returned as valid. No zero 
 
 Host telemetry is sampled in the daemon's existing periodic sampling loop, currently once per second alongside runtime cgroup sampling. The IPC request path never triggers storage or network collection.
 
-When at least one host source is valid, the IPC server replaces its latest in-memory host snapshot. If a later host collection attempt cannot produce either source, the daemon preserves the previous accepted snapshot rather than replacing it with fabricated zeroes.
+When at least one host source is valid, the IPC server replaces its latest in-memory host snapshot. If a later collection attempt cannot produce either source, the daemon invalidates the host snapshot so `host_snapshot` returns `HOST_METRICS_UNAVAILABLE` instead of presenting stale counters as fresh idle telemetry.
 
 Protocol v1 exposes the latest accepted value through:
 

@@ -81,9 +81,14 @@ int main(void)
         }
         if (next_sample_ns == 0U || monotonic_ns(now) >= next_sample_ns) {
             struct statd_host_snapshot host_snapshot = {0};
+            const enum statd_host_status host_status = statd_host_sample(&host_paths, &host_snapshot);
             statd_registry_sample_all(&registry);
-            if (statd_host_sample(&host_paths, &host_snapshot) == STATD_HOST_OK) {
+            if (host_status == STATD_HOST_OK) {
                 statd_ipc_server_set_host_snapshot(&server, &host_snapshot);
+            } else {
+                /* Do not let a completely failed host collection look like fresh idle telemetry. */
+                server.has_host_snapshot = false;
+                server.host_snapshot = (struct statd_host_snapshot){0};
             }
             next_sample_ns = monotonic_ns(now) + SAMPLE_INTERVAL_NS;
         }
