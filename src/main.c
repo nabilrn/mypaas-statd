@@ -1,3 +1,4 @@
+#include "host_metrics.h"
 #include "ipc.h"
 #include "sampler.h"
 
@@ -6,7 +7,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define MYPAAS_STATD_VERSION "0.1.0-dev"
+#define MYPAAS_STATD_VERSION "0.2.0-dev"
 #define DEFAULT_CGROUP_ROOT "/sys/fs/cgroup"
 #define DEFAULT_SOCKET_PATH "/run/mypaas/statd.sock"
 #define SAMPLE_INTERVAL_NS UINT64_C(1000000000)
@@ -47,8 +48,10 @@ int main(void)
     const char *socket_path = getenv("MYPAAS_STATD_SOCKET");
     struct statd_registry registry;
     struct statd_ipc_server server;
+    struct statd_host_paths host_paths;
     uint64_t next_sample_ns = 0U;
 
+    statd_host_default_paths(&host_paths);
     if (cgroup_root == NULL || cgroup_root[0] == '\0') {
         cgroup_root = DEFAULT_CGROUP_ROOT;
     }
@@ -77,7 +80,11 @@ int main(void)
             break;
         }
         if (next_sample_ns == 0U || monotonic_ns(now) >= next_sample_ns) {
+            struct statd_host_snapshot host_snapshot = {0};
             statd_registry_sample_all(&registry);
+            if (statd_host_sample(&host_paths, &host_snapshot) == STATD_HOST_OK) {
+                statd_ipc_server_set_host_snapshot(&server, &host_snapshot);
+            }
             next_sample_ns = monotonic_ns(now) + SAMPLE_INTERVAL_NS;
         }
         if (statd_ipc_server_step(&server, 250) == STATD_IPC_SYSTEM_ERROR) {
