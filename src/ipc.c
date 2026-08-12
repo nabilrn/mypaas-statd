@@ -18,6 +18,7 @@ enum request_operation {
     REQUEST_REGISTER,
     REQUEST_UNREGISTER,
     REQUEST_SNAPSHOT,
+    REQUEST_HOST_SNAPSHOT,
     REQUEST_STATUS
 };
 
@@ -106,6 +107,9 @@ static enum request_operation operation_from_string(const char *value)
     }
     if (strcmp(value, "snapshot") == 0) {
         return REQUEST_SNAPSHOT;
+    }
+    if (strcmp(value, "host_snapshot") == 0) {
+        return REQUEST_HOST_SNAPSHOT;
     }
     if (strcmp(value, "status") == 0) {
         return REQUEST_STATUS;
@@ -318,6 +322,67 @@ static void queue_snapshot(struct statd_ipc_client *client, const struct statd_s
     client->output_offset = 0U;
 }
 
+static bool safe_json_interface(const char *value)
+{
+    size_t index = 0U;
+    if (value == NULL || value[0] == '\0') {
+        return false;
+    }
+    for (index = 0U; value[index] != '\0'; index++) {
+        const unsigned char ch = (unsigned char)value[index];
+        if (ch < 0x20U || ch > 0x7eU || ch == (unsigned char)'"' ||
+            ch == (unsigned char)'\\') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void queue_host_snapshot(struct statd_ipc_client *client,
+                                const struct statd_host_snapshot *snapshot)
+{
+    char storage[192];
+    char network[256];
+    int written = 0;
+
+    if (snapshot->storage.valid) {
+        written = snprintf(storage, sizeof(storage),
+                           "{\"total_bytes\":%llu,\"available_bytes\":%llu}",
+                           (unsigned long long)snapshot->storage.total_bytes,
+                           (unsigned long long)snapshot->storage.available_bytes);
+    } else {
+        written = snprintf(storage, sizeof(storage), "null");
+    }
+    if (written < 0 || (size_t)written >= sizeof(storage)) {
+        client_close(client);
+        return;
+    }
+
+    if (snapshot->network.valid && safe_json_interface(snapshot->network.interface)) {
+        written = snprintf(network, sizeof(network),
+                           "{\"interface\":\"%s\",\"rx_bytes\":%llu,\"tx_bytes\":%llu}",
+                           snapshot->network.interface,
+                           (unsigned long long)snapshot->network.rx_bytes,
+                           (unsigned long long)snapshot->network.tx_bytes);
+    } else {
+        written = snprintf(network, sizeof(network), "null");
+    }
+    if (written < 0 || (size_t)written >= sizeof(network)) {
+        client_close(client);
+        return;
+    }
+
+    written = snprintf(client->output, sizeof(client->output),
+                       "{\"ok\":true,\"protocol\":1,\"storage\":%s,\"network\":%s}\n",
+                       storage, network);
+    if (written < 0 || (size_t)written >= sizeof(client->output)) {
+        client_close(client);
+        return;
+    }
+    client->output_len = (size_t)written;
+    client->output_offset = 0U;
+}
+
 static void handle_request(struct statd_ipc_server *server, struct statd_ipc_client *client,
                            const char *message, size_t message_len)
 {
@@ -335,7 +400,7 @@ static void handle_request(struct statd_ipc_server *server, struct statd_ipc_cli
         client->negotiated = true;
         queue_text(client,
                    "{\"ok\":true,\"protocol\":1,\"agent\":\"mypaas-statd\","
-                   "\"version\":\"0.1.0-dev\"}\n",
+                   "\"version\":\"0.2.0-dev\"}\n",
                    false);
         return;
     }
@@ -354,6 +419,14 @@ static void handle_request(struct statd_ipc_server *server, struct statd_ipc_cli
         }
         client->output_len = (size_t)written;
         client->output_offset = 0U;
+        return;
+    }
+    if (request.operation == REQUEST_HOST_SNAPSHOT) {
+        if (!server->has_host_snapshot) {
+            queue_error(client, "HOST_METRICS_UNAVAILABLE", false);
+            return;
+        }
+        queue_host_snapshot(client, &server->host_snapshot);
         return;
     }
 
@@ -604,6 +677,16 @@ enum statd_ipc_status statd_ipc_server_init(struct statd_ipc_server *server,
 
     memcpy(server->socket_path, socket_path, path_len + 1U);
     return STATD_IPC_OK;
+}
+
+void statd_ipc_server_set_host_snapshot(struct statd_ipc_server *server,
+                                        const struct statd_host_snapshot *snapshot)
+{
+    if (server == NULL || snapshot == NULL) {
+        return;
+    }
+    server->host_snapshot = *snapshot;
+    server->has_host_snapshot = true;
 }
 
 void statd_ipc_server_destroy(struct statd_ipc_server *server)
