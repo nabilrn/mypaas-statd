@@ -101,14 +101,20 @@ The published v0.1.0 source is the accepted release baseline for future compatib
 
 Goal: add the smallest mature host-level telemetry contract needed by the MyPaaS workspace dashboard without turning statd into a general monitoring agent.
 
-Phase 6 scope:
+Completed Phase 6 slices:
 - root-filesystem total and available bytes using `statvfs(3)`;
 - IPv4 default-route interface selection from bounded `/proc/net/route` rows;
 - cumulative RX/TX byte counters from `/sys/class/net/<iface>/statistics/`;
 - independent validity for storage and network sections;
-- deterministic fixtures/tests for route selection, counters, malformed/unavailable sources, and bounds;
-- additive protocol-v1 exposure in a later Phase 6 slice after the host readers are green;
-- MyPaaS control-plane integration only after the statd wire contract is tested.
+- deterministic tests for route selection, counters, partial availability, invalid input, and bounds;
+- periodic host sampling in the existing daemon sample loop;
+- additive protocol-v1 `host_snapshot` delivery from the latest in-memory sample;
+- deterministic IPC tests for unavailable, complete, partial, and unsafe-interface snapshots.
+
+Remaining Phase 6 work:
+- MyPaaS Go control-plane integration with staged compatibility for v0.1 daemons;
+- dashboard consumption and real rolling resource visualization;
+- v0.2 release preparation after end-to-end validation.
 
 Explicitly out of scope for Phase 6:
 - eBPF;
@@ -121,7 +127,7 @@ Explicitly out of scope for Phase 6:
 - time-series persistence;
 - a general host monitoring agent.
 
-The host-reader semantics are documented in `docs/HOST_TELEMETRY.md`.
+Host-reader semantics are documented in `docs/HOST_TELEMETRY.md`; the additive wire contract is documented in `docs/IPC_PROTOCOL.md`.
 
 ## Phase discipline
 

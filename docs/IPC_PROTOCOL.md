@@ -58,6 +58,32 @@ Unregister is idempotent.
 
 Unlimited limits are JSON `null`; CPU percent is `null` until a valid delta exists. `stale:true` means the last good snapshot is returned after a later sampling failure. Snapshot never triggers a full metrics sweep.
 
+## host_snapshot
+
+Phase 6 adds an additive protocol-v1 operation for host-level dashboard telemetry:
+
+```json
+{"op":"host_snapshot"}
+```
+
+The operation does not take a runtime `id` and does not read procfs, sysfs, or the filesystem in the request path. The daemon samples host telemetry in the existing periodic sampler loop and the request returns the latest accepted snapshot.
+
+Example response when both sources are valid:
+
+```json
+{"ok":true,"protocol":1,"storage":{"total_bytes":85899345920,"available_bytes":61847529062},"network":{"interface":"eth0","rx_bytes":18374829374,"tx_bytes":7391847291}}
+```
+
+Storage and network are independently nullable. For example, a host without a usable default route may return:
+
+```json
+{"ok":true,"protocol":1,"storage":{"total_bytes":85899345920,"available_bytes":61847529062},"network":null}
+```
+
+If no host sample has ever produced either a valid storage or network section, the operation returns `HOST_METRICS_UNAVAILABLE`.
+
+Network values are cumulative counters. Protocol v1 does not manufacture a bytes-per-second rate; callers derive rates from successive snapshots and elapsed time.
+
 ## status
 
 ```json
@@ -70,6 +96,10 @@ Returns registration count.
 
 Errors are stable machine-readable codes. Oversized input closes only that client after its error is written. A broken client cannot grow buffers without bound or block other client slots.
 
+Phase 6 adds `HOST_METRICS_UNAVAILABLE` for `host_snapshot` before any valid host sample exists. Existing v1 error codes and runtime operations are unchanged.
+
 ## Compatibility
 
 Protocol and daemon release versions are independent. MyPaaS must negotiate with `hello`.
+
+`host_snapshot` is additive to protocol 1. A v0.1 daemon that does not know the operation may reject it while continuing to serve existing protocol-v1 runtime operations; MyPaaS integration must therefore treat host storage/network telemetry as optional during staged upgrades.

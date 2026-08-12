@@ -11,6 +11,20 @@ The host snapshot contract contains two independently valid sections:
 
 If one source is unavailable, the other may still be returned as valid. No zero value is fabricated for an unavailable source.
 
+## Sampling and delivery
+
+Host telemetry is sampled in the daemon's existing periodic sampling loop, currently once per second alongside runtime cgroup sampling. The IPC request path never triggers storage or network collection.
+
+When at least one host source is valid, the IPC server replaces its latest in-memory host snapshot. If a later host collection attempt cannot produce either source, the daemon preserves the previous accepted snapshot rather than replacing it with fabricated zeroes.
+
+Protocol v1 exposes the latest accepted value through:
+
+```json
+{"op":"host_snapshot"}
+```
+
+The wire shape and staged-upgrade behavior are documented in `docs/IPC_PROTOCOL.md`.
+
 ## Storage
 
 The default storage path is `/`.
@@ -41,6 +55,8 @@ After selecting the interface, read cumulative byte counters from:
 - `/sys/class/net/<iface>/statistics/tx_bytes`.
 
 These counters are cumulative. `mypaas-statd` does not manufacture bytes-per-second rates. The MyPaaS control plane or frontend may derive rates from successive samples and elapsed time, resetting its baseline if a counter decreases after an interface reset.
+
+The IPC serializer independently rejects interface names that cannot be emitted safely by the protocol's unescaped printable-ASCII contract. An invalid interface value is represented as `network:null`, never interpolated into JSON.
 
 This phase intentionally does not use eBPF, packet capture, traffic control, Docker APIs, or per-container network accounting.
 
