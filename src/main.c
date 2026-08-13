@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #define MYPAAS_STATD_VERSION "0.2.0-dev"
@@ -42,15 +43,39 @@ static uint64_t monotonic_ns(struct timespec value)
     return (uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec;
 }
 
-int main(void)
+static int handle_cli(int argc, char **argv)
 {
-    const char *cgroup_root = getenv("MYPAAS_STATD_CGROUP_ROOT");
-    const char *socket_path = getenv("MYPAAS_STATD_SOCKET");
+    if (argc == 1) {
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        printf("mypaas-statd %s\n", MYPAAS_STATD_VERSION);
+        return 1;
+    }
+
+    fprintf(stderr, "usage: mypaas-statd [--version]\n");
+    return -1;
+}
+
+int main(int argc, char **argv)
+{
+    const int cli_status = handle_cli(argc, argv);
+    const char *cgroup_root = NULL;
+    const char *socket_path = NULL;
     struct statd_registry registry;
     struct statd_ipc_server server;
     struct statd_host_paths host_paths;
     uint64_t next_sample_ns = 0U;
 
+    if (cli_status > 0) {
+        return EXIT_SUCCESS;
+    }
+    if (cli_status < 0) {
+        return EXIT_FAILURE;
+    }
+
+    cgroup_root = getenv("MYPAAS_STATD_CGROUP_ROOT");
+    socket_path = getenv("MYPAAS_STATD_SOCKET");
     statd_host_default_paths(&host_paths);
     if (cgroup_root == NULL || cgroup_root[0] == '\0') {
         cgroup_root = DEFAULT_CGROUP_ROOT;
