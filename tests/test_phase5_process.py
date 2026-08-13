@@ -95,6 +95,26 @@ def main() -> int:
     if not DAEMON.exists():
         raise RuntimeError(f"daemon binary is missing: {DAEMON}")
 
+    version = subprocess.run(
+        [str(DAEMON), "--version"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert version.stdout.strip() == "mypaas-statd 0.2.0-dev", version.stdout
+    assert version.stderr == "", version.stderr
+
+    invalid = subprocess.run(
+        [str(DAEMON), "--not-a-real-option"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert invalid.returncode != 0, invalid.returncode
+    assert "usage: mypaas-statd [--version]" in invalid.stderr, invalid.stderr
+
     tmp = Path(tempfile.mkdtemp(prefix="mypaas-statd-phase5-"))
     proc: subprocess.Popen[str] | None = None
     try:
