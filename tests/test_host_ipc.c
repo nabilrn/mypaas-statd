@@ -133,6 +133,12 @@ static int test_unavailable_then_complete_snapshot(void)
                    sizeof(response)) == 0);
     CHECK(strstr(response, "HOST_METRICS_UNAVAILABLE") != NULL);
 
+    snapshot.memory.valid = true;
+    snapshot.memory.total_bytes = UINT64_C(4096000);
+    snapshot.memory.available_bytes = UINT64_C(1536000);
+    snapshot.cpu.valid = true;
+    snapshot.cpu.total_ticks = UINT64_C(630);
+    snapshot.cpu.idle_ticks = UINT64_C(450);
     snapshot.storage.valid = true;
     snapshot.storage.total_bytes = UINT64_C(1000);
     snapshot.storage.available_bytes = UINT64_C(400);
@@ -145,6 +151,13 @@ static int test_unavailable_then_complete_snapshot(void)
     CHECK(exchange(&env.server, client, "{\"op\":\"host_snapshot\"}\n", response,
                    sizeof(response)) == 0);
     CHECK(strstr(response, "\"ok\":true") != NULL);
+    CHECK(strstr(response, "\"memory\":{") != NULL);
+    CHECK(strstr(response, "\"total_bytes\":4096000") != NULL);
+    CHECK(strstr(response, "\"available_bytes\":1536000") != NULL);
+    CHECK(strstr(response, "\"cpu\":{") != NULL);
+    CHECK(strstr(response, "\"total_ticks\":630") != NULL);
+    CHECK(strstr(response, "\"idle_ticks\":450") != NULL);
+    CHECK(strstr(response, "\"storage\":{") != NULL);
     CHECK(strstr(response, "\"total_bytes\":1000") != NULL);
     CHECK(strstr(response, "\"available_bytes\":400") != NULL);
     CHECK(strstr(response, "\"interface\":\"eth0\"") != NULL);
@@ -174,6 +187,8 @@ static int test_partial_snapshot_serializes_null(void)
     CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
     CHECK(exchange(&env.server, client, "{\"op\":\"host_snapshot\"}\n", response,
                    sizeof(response)) == 0);
+    CHECK(strstr(response, "\"memory\":null") != NULL);
+    CHECK(strstr(response, "\"cpu\":null") != NULL);
     CHECK(strstr(response, "\"storage\":{") != NULL);
     CHECK(strstr(response, "\"network\":null") != NULL);
 
@@ -201,6 +216,8 @@ static int test_unsafe_interface_is_not_serialized(void)
     CHECK(negotiate(&env.server, client, response, sizeof(response)) == 0);
     CHECK(exchange(&env.server, client, "{\"op\":\"host_snapshot\"}\n", response,
                    sizeof(response)) == 0);
+    CHECK(strstr(response, "\"memory\":null") != NULL);
+    CHECK(strstr(response, "\"cpu\":null") != NULL);
     CHECK(strstr(response, "\"storage\":null") != NULL);
     CHECK(strstr(response, "\"network\":null") != NULL);
     CHECK(strstr(response, "bad\\iface") == NULL);
