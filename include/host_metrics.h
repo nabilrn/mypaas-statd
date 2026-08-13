@@ -11,6 +11,20 @@ struct statd_host_paths {
     const char *storage_path;
     const char *route_path;
     const char *net_class_path;
+    const char *meminfo_path;
+    const char *proc_stat_path;
+};
+
+struct statd_host_memory_snapshot {
+    bool valid;
+    uint64_t total_bytes;
+    uint64_t available_bytes;
+};
+
+struct statd_host_cpu_snapshot {
+    bool valid;
+    uint64_t total_ticks;
+    uint64_t idle_ticks;
 };
 
 struct statd_host_storage_snapshot {
@@ -27,6 +41,8 @@ struct statd_host_network_snapshot {
 };
 
 struct statd_host_snapshot {
+    struct statd_host_memory_snapshot memory;
+    struct statd_host_cpu_snapshot cpu;
     struct statd_host_storage_snapshot storage;
     struct statd_host_network_snapshot network;
 };
