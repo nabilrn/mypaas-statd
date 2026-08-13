@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*.*.*"
+    branches:
+      - "release/v*.*.*"
 
 permissions:
   contents: write
@@ -18,6 +20,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Resolve release version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            release_ref="${GITHUB_REF_NAME}"
+          else
+            release_ref="${GITHUB_REF_NAME#release/}"
+          fi
+          if ! printf '%s' "${release_ref}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "invalid release ref: ${release_ref}" >&2
+            exit 1
+          fi
+          release_version="${release_ref#v}"
+          printf 'RELEASE_REF=%s\n' "${release_ref}" >> "${GITHUB_ENV}"
+          printf 'RELEASE_VERSION=%s\n' "${release_version}" >> "${GITHUB_ENV}"
+
       - name: Install static analysis dependency
         run: |
           sudo apt-get update
@@ -30,9 +47,7 @@ jobs:
 
       - name: Stamp tagged daemon version
         run: |
-          release_version="${GITHUB_REF_NAME#v}"
-          test -n "${release_version}"
-          sed -E -i "s/[0-9]+\.[0-9]+\.[0-9]+-dev/${release_version}/g" src/main.c src/ipc.c
+          sed -E -i "s/[0-9]+\.[0-9]+\.[0-9]+-dev/${RELEASE_VERSION}/g" src/main.c src/ipc.c
           if grep -Eq '[0-9]+\.[0-9]+\.[0-9]+-dev' src/main.c src/ipc.c; then
             echo "development version marker remained after release stamping" >&2
             exit 1
@@ -42,15 +57,14 @@ jobs:
         env:
           CC: clang
         run: |
-          release_version="${GITHUB_REF_NAME#v}"
           make clean
           make all
-          test "$(./build/mypaas-statd --version)" = "mypaas-statd ${release_version}"
+          test "$(./build/mypaas-statd --version)" = "mypaas-statd ${RELEASE_VERSION}"
 
       - name: Build versioned release package
         env:
           CC: clang
-        run: make package VERSION="${GITHUB_REF_NAME}"
+        run: make package VERSION="${RELEASE_REF}"
 
       - name: Verify packaged checksum and version
         run: |
@@ -59,15 +73,20 @@ jobs:
           cd dist
           sha256sum -c SHA256SUMS
           tar -C "$extract_dir" -xzf mypaas-statd-linux-amd64.tar.gz
-          test "$(cat "$extract_dir/VERSION")" = "${GITHUB_REF_NAME}"
-          test "$("$extract_dir/mypaas-statd" --version)" = "mypaas-statd ${GITHUB_REF_NAME#v}"
+          test "$(cat "$extract_dir/VERSION")" = "${RELEASE_REF}"
+          test "$("$extract_dir/mypaas-statd" --version)" = "mypaas-statd ${RELEASE_VERSION}"
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          if gh release view "${RELEASE_REF}" >/dev/null 2>&1; then
+            echo "release ${RELEASE_REF} already exists" >&2
+            exit 1
+          fi
+          gh release create "${RELEASE_REF}" \
             dist/mypaas-statd-linux-amd64.tar.gz \
             dist/SHA256SUMS \
-            --title "mypaas-statd ${GITHUB_REF_NAME}" \
+            --target "${GITHUB_SHA}" \
+            --title "mypaas-statd ${RELEASE_REF}" \
             --generate-notes
