@@ -17,6 +17,8 @@
 struct fixture {
     char base[256];
     char route[320];
+    char meminfo[320];
+    char proc_stat[320];
     char net_root[320];
     char eth0[384];
     char eth1[384];
@@ -47,6 +49,8 @@ static int fixture_init(struct fixture *fixture)
     memset(fixture, 0, sizeof(*fixture));
     if (snprintf(fixture->base, sizeof(fixture->base), "%s", base) < 0 ||
         snprintf(fixture->route, sizeof(fixture->route), "%s/route", base) < 0 ||
+        snprintf(fixture->meminfo, sizeof(fixture->meminfo), "%s/meminfo", base) < 0 ||
+        snprintf(fixture->proc_stat, sizeof(fixture->proc_stat), "%s/stat", base) < 0 ||
         snprintf(fixture->net_root, sizeof(fixture->net_root), "%s/net", base) < 0 ||
         snprintf(fixture->eth0, sizeof(fixture->eth0), "%s/eth0", fixture->net_root) < 0 ||
         snprintf(fixture->eth1, sizeof(fixture->eth1), "%s/eth1", fixture->net_root) < 0 ||
@@ -70,6 +74,8 @@ static void fixture_destroy(const struct fixture *fixture)
     if (snprintf(path, sizeof(path), "%s/rx_bytes", fixture->eth1_stats) > 0) unlink(path);
     if (snprintf(path, sizeof(path), "%s/tx_bytes", fixture->eth1_stats) > 0) unlink(path);
     unlink(fixture->route);
+    unlink(fixture->meminfo);
+    unlink(fixture->proc_stat);
     rmdir(fixture->eth0_stats);
     rmdir(fixture->eth1_stats);
     rmdir(fixture->eth0);
@@ -88,6 +94,17 @@ static int write_counter(const char *stats_dir, const char *name, const char *va
     return write_text(path, value);
 }
 
+static struct statd_host_paths fixture_paths(const struct fixture *fixture)
+{
+    struct statd_host_paths paths = {0};
+    paths.storage_path = fixture->base;
+    paths.route_path = fixture->route;
+    paths.net_class_path = fixture->net_root;
+    paths.meminfo_path = fixture->meminfo;
+    paths.proc_stat_path = fixture->proc_stat;
+    return paths;
+}
+
 static int test_default_paths(void)
 {
     struct statd_host_paths paths = {0};
@@ -95,30 +112,42 @@ static int test_default_paths(void)
     CHECK(strcmp(paths.storage_path, "/") == 0);
     CHECK(strcmp(paths.route_path, "/proc/net/route") == 0);
     CHECK(strcmp(paths.net_class_path, "/sys/class/net") == 0);
+    CHECK(strcmp(paths.meminfo_path, "/proc/meminfo") == 0);
+    CHECK(strcmp(paths.proc_stat_path, "/proc/stat") == 0);
     return 0;
 }
 
-static int test_storage_and_lowest_metric_default_route(void)
+static int test_complete_snapshot(void)
 {
     struct fixture fixture;
     struct statd_host_snapshot snapshot = {0};
     struct statd_host_paths paths;
 
     CHECK(fixture_init(&fixture) == 0);
+    CHECK(write_text(fixture.meminfo,
+                     "MemTotal:        4096000 kB\n"
+                     "MemFree:          256000 kB\n"
+                     "MemAvailable:    1536000 kB\n") == 0);
+    CHECK(write_text(fixture.proc_stat,
+                     "cpu  100 20 30 400 50 10 15 5 0 0\n"
+                     "cpu0 50 10 15 200 25 5 8 2 0 0\n") == 0);
     CHECK(write_text(fixture.route,
                      "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
                      "eth0\t00000000\t0100000A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
-                     "eth1\t00000000\t0200000A\t0003\t0\t0\t50\t00000000\t0\t0\t0\n"
-                     "eth0\t0000000A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n") == 0);
+                     "eth1\t00000000\t0200000A\t0003\t0\t0\t50\t00000000\t0\t0\t0\n") == 0);
     CHECK(write_counter(fixture.eth0_stats, "rx_bytes", "111\n") == 0);
     CHECK(write_counter(fixture.eth0_stats, "tx_bytes", "222\n") == 0);
     CHECK(write_counter(fixture.eth1_stats, "rx_bytes", "123456\n") == 0);
     CHECK(write_counter(fixture.eth1_stats, "tx_bytes", "789012\n") == 0);
 
-    paths.storage_path = fixture.base;
-    paths.route_path = fixture.route;
-    paths.net_class_path = fixture.net_root;
+    paths = fixture_paths(&fixture);
     CHECK(statd_host_sample(&paths, &snapshot) == STATD_HOST_OK);
+    CHECK(snapshot.memory.valid);
+    CHECK(snapshot.memory.total_bytes == UINT64_C(4096000) * UINT64_C(1024));
+    CHECK(snapshot.memory.available_bytes == UINT64_C(1536000) * UINT64_C(1024));
+    CHECK(snapshot.cpu.valid);
+    CHECK(snapshot.cpu.total_ticks == UINT64_C(630));
+    CHECK(snapshot.cpu.idle_ticks == UINT64_C(450));
     CHECK(snapshot.storage.valid);
     CHECK(snapshot.storage.total_bytes > 0U);
     CHECK(snapshot.storage.available_bytes <= snapshot.storage.total_bytes);
@@ -131,21 +160,24 @@ static int test_storage_and_lowest_metric_default_route(void)
     return 0;
 }
 
-static int test_storage_remains_available_without_default_route(void)
+static int test_partial_snapshot_keeps_independent_sources(void)
 {
     struct fixture fixture;
     struct statd_host_snapshot snapshot = {0};
     struct statd_host_paths paths;
 
     CHECK(fixture_init(&fixture) == 0);
+    CHECK(write_text(fixture.meminfo,
+                     "MemTotal:        2048000 kB\n"
+                     "MemAvailable:    1024000 kB\n") == 0);
     CHECK(write_text(fixture.route,
                      "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
                      "eth0\t0000000A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n") == 0);
 
-    paths.storage_path = fixture.base;
-    paths.route_path = fixture.route;
-    paths.net_class_path = fixture.net_root;
+    paths = fixture_paths(&fixture);
     CHECK(statd_host_sample(&paths, &snapshot) == STATD_HOST_OK);
+    CHECK(snapshot.memory.valid);
+    CHECK(!snapshot.cpu.valid);
     CHECK(snapshot.storage.valid);
     CHECK(!snapshot.network.valid);
 
@@ -153,12 +185,12 @@ static int test_storage_remains_available_without_default_route(void)
     return 0;
 }
 
-static int test_network_remains_available_when_storage_path_is_missing(void)
+static int test_network_remains_available_when_other_paths_are_missing(void)
 {
     struct fixture fixture;
     struct statd_host_snapshot snapshot = {0};
     struct statd_host_paths paths;
-    char missing_storage[320];
+    char missing[320];
 
     CHECK(fixture_init(&fixture) == 0);
     CHECK(write_text(fixture.route,
@@ -166,12 +198,15 @@ static int test_network_remains_available_when_storage_path_is_missing(void)
                      "eth0\t00000000\t0100000A\t0003\t0\t0\t10\t00000000\t0\t0\t0\n") == 0);
     CHECK(write_counter(fixture.eth0_stats, "rx_bytes", "42\n") == 0);
     CHECK(write_counter(fixture.eth0_stats, "tx_bytes", "84\n") == 0);
-    CHECK(snprintf(missing_storage, sizeof(missing_storage), "%s/missing", fixture.base) > 0);
+    CHECK(snprintf(missing, sizeof(missing), "%s/missing", fixture.base) > 0);
 
-    paths.storage_path = missing_storage;
-    paths.route_path = fixture.route;
-    paths.net_class_path = fixture.net_root;
+    paths = fixture_paths(&fixture);
+    paths.storage_path = missing;
+    paths.meminfo_path = missing;
+    paths.proc_stat_path = missing;
     CHECK(statd_host_sample(&paths, &snapshot) == STATD_HOST_OK);
+    CHECK(!snapshot.memory.valid);
+    CHECK(!snapshot.cpu.valid);
     CHECK(!snapshot.storage.valid);
     CHECK(snapshot.network.valid);
     CHECK(snapshot.network.rx_bytes == UINT64_C(42));
@@ -181,11 +216,40 @@ static int test_network_remains_available_when_storage_path_is_missing(void)
     return 0;
 }
 
+static int test_rejects_invalid_memory_and_cpu_samples(void)
+{
+    struct fixture fixture;
+    struct statd_host_snapshot snapshot = {0};
+    struct statd_host_paths paths;
+    char missing[320];
+
+    CHECK(fixture_init(&fixture) == 0);
+    CHECK(write_text(fixture.meminfo,
+                     "MemTotal:        1024 kB\n"
+                     "MemAvailable:    2048 kB\n") == 0);
+    CHECK(write_text(fixture.proc_stat, "cpu nope\n") == 0);
+    CHECK(snprintf(missing, sizeof(missing), "%s/missing", fixture.base) > 0);
+
+    paths = fixture_paths(&fixture);
+    paths.storage_path = missing;
+    paths.route_path = missing;
+    paths.net_class_path = missing;
+    CHECK(statd_host_sample(&paths, &snapshot) == STATD_HOST_UNAVAILABLE);
+
+    fixture_destroy(&fixture);
+    return 0;
+}
+
 static int test_invalid_and_fully_unavailable(void)
 {
     struct statd_host_snapshot snapshot = {0};
-    struct statd_host_paths paths = {"/definitely-not-present", "/definitely-not-present",
-                                     "/definitely-not-present"};
+    struct statd_host_paths paths = {0};
+
+    paths.storage_path = "/definitely-not-present";
+    paths.route_path = "/definitely-not-present";
+    paths.net_class_path = "/definitely-not-present";
+    paths.meminfo_path = "/definitely-not-present";
+    paths.proc_stat_path = "/definitely-not-present";
 
     CHECK(statd_host_sample(NULL, &snapshot) == STATD_HOST_INVALID);
     CHECK(statd_host_sample(&paths, NULL) == STATD_HOST_INVALID);
@@ -196,9 +260,10 @@ static int test_invalid_and_fully_unavailable(void)
 int main(void)
 {
     CHECK(test_default_paths() == 0);
-    CHECK(test_storage_and_lowest_metric_default_route() == 0);
-    CHECK(test_storage_remains_available_without_default_route() == 0);
-    CHECK(test_network_remains_available_when_storage_path_is_missing() == 0);
+    CHECK(test_complete_snapshot() == 0);
+    CHECK(test_partial_snapshot_keeps_independent_sources() == 0);
+    CHECK(test_network_remains_available_when_other_paths_are_missing() == 0);
+    CHECK(test_rejects_invalid_memory_and_cpu_samples() == 0);
     CHECK(test_invalid_and_fully_unavailable() == 0);
     puts("phase 6 host telemetry tests passed");
     return 0;
