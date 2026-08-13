@@ -1,21 +1,23 @@
 # Host telemetry contract
 
-Phase 6 extends `mypaas-statd` with small Linux-native host-capacity readers for MyPaaS dashboard telemetry. This is separate from per-runtime cgroup telemetry.
+Phase 6 extends `mypaas-statd` with small Linux-native host readers for MyPaaS dashboard telemetry. This is separate from per-runtime cgroup telemetry.
 
 ## Scope
 
-The host snapshot contract contains two independently valid sections:
+A host snapshot may contain four independently valid sections:
 
+- host memory capacity from `/proc/meminfo`;
+- cumulative aggregate CPU counters from `/proc/stat`;
 - storage capacity for the host root filesystem;
 - cumulative receive/transmit byte counters for the IPv4 default-route interface.
 
-If one source is unavailable, the other may still be returned as valid. No zero value is fabricated for an unavailable source.
+Each section is optional. No zero value is fabricated for an unavailable source. `STATD_HOST_UNAVAILABLE` is returned only when none of the host sources can be sampled.
 
 ## Sampling and delivery
 
-Host telemetry is sampled in the daemon's existing periodic sampling loop, currently once per second alongside runtime cgroup sampling. The IPC request path never triggers storage or network collection.
+Host telemetry is sampled in the daemon's existing periodic sampling loop, currently once per second alongside runtime cgroup sampling. The IPC request path never triggers kernel/procfs collection.
 
-When at least one host source is valid, the IPC server replaces its latest in-memory host snapshot. If a later collection attempt cannot produce either source, the daemon invalidates the host snapshot so `host_snapshot` returns `HOST_METRICS_UNAVAILABLE` instead of presenting stale counters as fresh idle telemetry.
+When at least one host source is valid, the IPC server replaces its latest in-memory host snapshot. If a later collection attempt cannot produce any source, the daemon invalidates the host snapshot so `host_snapshot` returns `HOST_METRICS_UNAVAILABLE` instead of presenting stale counters as fresh idle telemetry.
 
 Protocol v1 exposes the latest accepted value through:
 
@@ -23,7 +25,46 @@ Protocol v1 exposes the latest accepted value through:
 {"op":"host_snapshot"}
 ```
 
-The wire shape and staged-upgrade behavior are documented in `docs/IPC_PROTOCOL.md`.
+The extension remains additive. Consumers must tolerate missing sections so staged upgrades remain safe.
+
+## Memory
+
+Host memory is read from `/proc/meminfo` using:
+
+- `MemTotal`;
+- `MemAvailable`.
+
+Both Linux `kB` values are converted to bytes with checked arithmetic. `MemAvailable` is intentionally used instead of `MemFree` because it is the kernel estimate of memory available for starting new applications without swapping.
+
+Consumers may derive:
+
+```text
+used_bytes = total_bytes - available_bytes
+usage_percent = used_bytes / total_bytes * 100
+```
+
+A sample is invalid if either field is missing, the unit is not `kB`, total is zero, available exceeds total, or conversion overflows.
+
+## CPU
+
+The daemon reads the aggregate `cpu` line from `/proc/stat` and exports cumulative counters rather than manufacturing a percentage.
+
+The exported counters are:
+
+- `total_ticks`: sum of user, nice, system, idle, iowait, irq, softirq, and steal counters;
+- `idle_ticks`: idle + iowait.
+
+Guest and guest_nice are not added separately because Linux already accounts them inside user/nice. Tick frequency does not need to be known for utilization ratios.
+
+A consumer derives utilization from two successive samples:
+
+```text
+delta_total = total_ticks_2 - total_ticks_1
+delta_idle  = idle_ticks_2 - idle_ticks_1
+cpu_usage   = (delta_total - delta_idle) / delta_total * 100
+```
+
+If counters decrease, `delta_total` is zero, or the baseline is otherwise invalid, the consumer must reset its baseline and wait for the next sample rather than emitting a negative or fabricated percentage.
 
 ## Storage
 
@@ -54,28 +95,18 @@ After selecting the interface, read cumulative byte counters from:
 - `/sys/class/net/<iface>/statistics/rx_bytes`;
 - `/sys/class/net/<iface>/statistics/tx_bytes`.
 
-These counters are cumulative. `mypaas-statd` does not manufacture bytes-per-second rates. The MyPaaS control plane or frontend may derive rates from successive samples and elapsed time, resetting its baseline if a counter decreases after an interface reset.
+These counters are cumulative. `mypaas-statd` does not manufacture bytes-per-second rates. The MyPaaS frontend may derive rates from successive samples and elapsed time, resetting its baseline if a counter decreases after an interface reset.
 
 The IPC serializer independently rejects interface names that cannot be emitted safely by the protocol's unescaped printable-ASCII contract. An invalid interface value is represented as `network:null`, never interpolated into JSON.
 
 This phase intentionally does not use eBPF, packet capture, traffic control, Docker APIs, or per-container network accounting.
-
-## Kernel/interface references
-
-Implementation semantics were checked against:
-
-- Linux `statvfs(3)` / Linux man-pages for mounted-filesystem statistics;
-- Linux kernel interface-statistics documentation and `sysfs-class-net-statistics` ABI for `rx_bytes` and `tx_bytes`;
-- Linux procfs networking documentation for `/proc/net` namespace behavior.
-
-The `/proc/net/route` row subset consumed by MyPaaS is locked by deterministic parser fixtures and must remain bounded. If a future kernel/runtime target requires a different route-discovery mechanism, prefer an explicit contract change over heuristic parsing.
 
 ## Failure behavior
 
 `statd_host_sample` returns:
 
 - `STATD_HOST_INVALID` for invalid arguments;
-- `STATD_HOST_UNAVAILABLE` only when both storage and network sources are unavailable;
+- `STATD_HOST_UNAVAILABLE` only when memory, CPU, storage, and network are all unavailable;
 - `STATD_HOST_OK` when at least one section is valid.
 
-The caller must inspect each section's `valid` flag. Missing telemetry is not represented as a fabricated zero.
+The caller must inspect each section's `valid` flag. Missing telemetry is never represented as a fabricated zero.
