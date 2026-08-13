@@ -341,9 +341,37 @@ static bool safe_json_interface(const char *value)
 static void queue_host_snapshot(struct statd_ipc_client *client,
                                 const struct statd_host_snapshot *snapshot)
 {
+    char memory[192];
+    char cpu[192];
     char storage[192];
     char network[256];
     int written = 0;
+
+    if (snapshot->memory.valid) {
+        written = snprintf(memory, sizeof(memory),
+                           "{\"total_bytes\":%llu,\"available_bytes\":%llu}",
+                           (unsigned long long)snapshot->memory.total_bytes,
+                           (unsigned long long)snapshot->memory.available_bytes);
+    } else {
+        written = snprintf(memory, sizeof(memory), "null");
+    }
+    if (written < 0 || (size_t)written >= sizeof(memory)) {
+        client_close(client);
+        return;
+    }
+
+    if (snapshot->cpu.valid) {
+        written = snprintf(cpu, sizeof(cpu),
+                           "{\"total_ticks\":%llu,\"idle_ticks\":%llu}",
+                           (unsigned long long)snapshot->cpu.total_ticks,
+                           (unsigned long long)snapshot->cpu.idle_ticks);
+    } else {
+        written = snprintf(cpu, sizeof(cpu), "null");
+    }
+    if (written < 0 || (size_t)written >= sizeof(cpu)) {
+        client_close(client);
+        return;
+    }
 
     if (snapshot->storage.valid) {
         written = snprintf(storage, sizeof(storage),
@@ -373,8 +401,9 @@ static void queue_host_snapshot(struct statd_ipc_client *client,
     }
 
     written = snprintf(client->output, sizeof(client->output),
-                       "{\"ok\":true,\"protocol\":1,\"storage\":%s,\"network\":%s}\n",
-                       storage, network);
+                       "{\"ok\":true,\"protocol\":1,\"memory\":%s,\"cpu\":%s,"
+                       "\"storage\":%s,\"network\":%s}\n",
+                       memory, cpu, storage, network);
     if (written < 0 || (size_t)written >= sizeof(client->output)) {
         client_close(client);
         return;

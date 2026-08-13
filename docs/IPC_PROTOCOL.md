@@ -27,6 +27,7 @@ Every connection must successfully negotiate protocol 1 before other operations.
 ## register
 
 Production MyPaaS registration uses the host PID reported by Docker once during runtime lifecycle transitions:
+
 ```json
 {"op":"register","id":"runtime-id","pid":12345}
 ```
@@ -34,6 +35,7 @@ Production MyPaaS registration uses the host PID reported by Docker once during 
 statd reads `/proc/<pid>/cgroup` on the host and selects the cgroup v2 entry documented by Linux as `0::$PATH`. The root cgroup, deleted membership, malformed paths, and traversal-like components are rejected. statd does not infer Docker/systemd cgroup directory naming.
 
 For deterministic tests and local administrative diagnostics, v1 also accepts an explicit already-resolved relative cgroup path:
+
 ```json
 {"op":"register","id":"runtime-id","cgroup":"system.slice/runtime.scope"}
 ```
@@ -68,21 +70,33 @@ Phase 6 adds an additive protocol-v1 operation for host-level dashboard telemetr
 
 The operation does not take a runtime `id` and does not read procfs, sysfs, or the filesystem in the request path. The daemon samples host telemetry in the existing periodic sampler loop and the request returns the latest accepted snapshot.
 
-Example response when both sources are valid:
+Example response when all sections are valid:
 
 ```json
-{"ok":true,"protocol":1,"storage":{"total_bytes":85899345920,"available_bytes":61847529062},"network":{"interface":"eth0","rx_bytes":18374829374,"tx_bytes":7391847291}}
+{"ok":true,"protocol":1,"memory":{"total_bytes":4112515072,"available_bytes":2315255808},"cpu":{"total_ticks":918273645,"idle_ticks":712345678},"storage":{"total_bytes":85899345920,"available_bytes":61847529062},"network":{"interface":"eth0","rx_bytes":18374829374,"tx_bytes":7391847291}}
 ```
 
-Storage and network are independently nullable. For example, a host without a usable default route may return:
+`memory`, `cpu`, `storage`, and `network` are independently nullable. For example:
 
 ```json
-{"ok":true,"protocol":1,"storage":{"total_bytes":85899345920,"available_bytes":61847529062},"network":null}
+{"ok":true,"protocol":1,"memory":{"total_bytes":4112515072,"available_bytes":2315255808},"cpu":null,"storage":{"total_bytes":85899345920,"available_bytes":61847529062},"network":null}
 ```
 
-If no host sample has ever produced either a valid storage or network section, the operation returns `HOST_METRICS_UNAVAILABLE`.
+If no host sample has produced any valid host section, the operation returns `HOST_METRICS_UNAVAILABLE`.
 
-Network values are cumulative counters. Protocol v1 does not manufacture a bytes-per-second rate; callers derive rates from successive snapshots and elapsed time.
+Memory values are current host capacity counters. Consumers derive used memory as `total_bytes - available_bytes`.
+
+CPU values are cumulative aggregate counters. Protocol v1 does not manufacture a CPU percentage. Consumers derive utilization from successive snapshots:
+
+```text
+delta_total = total_ticks_2 - total_ticks_1
+delta_idle  = idle_ticks_2 - idle_ticks_1
+usage       = (delta_total - delta_idle) / delta_total * 100
+```
+
+A counter decrease or zero total delta resets the consumer baseline.
+
+Network values are also cumulative counters. Protocol v1 does not manufacture a bytes-per-second rate; callers derive rates from successive snapshots and elapsed time.
 
 ## status
 
@@ -102,4 +116,4 @@ Phase 6 adds `HOST_METRICS_UNAVAILABLE` for `host_snapshot` before any valid hos
 
 Protocol and daemon release versions are independent. MyPaaS must negotiate with `hello`.
 
-`host_snapshot` is additive to protocol 1. A v0.1 daemon that does not know the operation may reject it while continuing to serve existing protocol-v1 runtime operations; MyPaaS integration must therefore treat host storage/network telemetry as optional during staged upgrades.
+`host_snapshot` remains additive to protocol 1. A v0.1 daemon that does not know the operation may reject it while continuing to serve existing protocol-v1 runtime operations. MyPaaS integration must therefore treat all host telemetry sections as optional during staged upgrades.
