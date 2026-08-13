@@ -28,22 +28,39 @@ jobs:
           CC: clang
         run: make verify
 
+      - name: Stamp tagged daemon version
+        run: |
+          release_version="${GITHUB_REF_NAME#v}"
+          test -n "${release_version}"
+          sed -E -i "s/[0-9]+\.[0-9]+\.[0-9]+-dev/${release_version}/g" src/main.c src/ipc.c
+          if grep -Eq '[0-9]+\.[0-9]+\.[0-9]+-dev' src/main.c src/ipc.c; then
+            echo "development version marker remained after release stamping" >&2
+            exit 1
+          fi
+
       - name: Build optimized release binary
         env:
           CC: clang
         run: |
+          release_version="${GITHUB_REF_NAME#v}"
           make clean
           make all
+          test "$(./build/mypaas-statd --version)" = "mypaas-statd ${release_version}"
 
       - name: Build versioned release package
         env:
           CC: clang
         run: make package VERSION="${GITHUB_REF_NAME}"
 
-      - name: Verify packaged checksum
+      - name: Verify packaged checksum and version
         run: |
+          extract_dir="$(mktemp -d)"
+          trap 'rm -rf "$extract_dir"' EXIT
           cd dist
           sha256sum -c SHA256SUMS
+          tar -C "$extract_dir" -xzf mypaas-statd-linux-amd64.tar.gz
+          test "$(cat "$extract_dir/VERSION")" = "${GITHUB_REF_NAME}"
+          test "$("$extract_dir/mypaas-statd" --version)" = "mypaas-statd ${GITHUB_REF_NAME#v}"
 
       - name: Publish GitHub Release
         env:
