@@ -84,7 +84,7 @@ static void fixture_destroy(const struct fixture *fixture)
 {
     static const char *const counters[] = {
         "rx_bytes", "tx_bytes", "rx_packets", "tx_packets",
-        "rx_errors", "tx_errors", "rx_dropped", "tx_dropped",
+        "rx_errors", "tx_errors", "rx_dropped", "tx_dropped", "rx_missed_errors",
     };
     size_t index = 0U;
     for (index = 0U; index < sizeof(counters) / sizeof(counters[0]); index++) {
@@ -119,7 +119,7 @@ static int write_network_counters(const char *stats_dir, uint64_t base)
     char value[64];
     static const char *const names[] = {
         "rx_bytes", "tx_bytes", "rx_packets", "tx_packets",
-        "rx_errors", "tx_errors", "rx_dropped", "tx_dropped",
+        "rx_errors", "tx_errors", "rx_dropped", "tx_dropped", "rx_missed_errors",
     };
     size_t index = 0U;
     for (index = 0U; index < sizeof(names) / sizeof(names[0]); index++) {
@@ -204,6 +204,10 @@ static int test_complete_snapshot(void)
     CHECK(snapshot.cpu.valid);
     CHECK(snapshot.cpu.total_ticks == UINT64_C(630));
     CHECK(snapshot.cpu.idle_ticks == UINT64_C(450));
+    CHECK(snapshot.cpu.iowait_ticks == UINT64_C(50));
+    CHECK(snapshot.cpu.irq_ticks == UINT64_C(10));
+    CHECK(snapshot.cpu.softirq_ticks == UINT64_C(15));
+    CHECK(snapshot.cpu.steal_ticks == UINT64_C(5));
     CHECK(snapshot.storage.valid);
     CHECK(snapshot.network.valid);
     CHECK(strcmp(snapshot.network.interface, "eth1") == 0);
@@ -215,6 +219,7 @@ static int test_complete_snapshot(void)
     CHECK(snapshot.network.tx_errors == UINT64_C(1005));
     CHECK(snapshot.network.rx_dropped == UINT64_C(1006));
     CHECK(snapshot.network.tx_dropped == UINT64_C(1007));
+    CHECK(snapshot.network.rx_missed_errors == UINT64_C(1008));
     CHECK(snapshot.tcp.snmp_valid);
     CHECK(snapshot.tcp.current_established == UINT64_C(7));
     CHECK(snapshot.tcp.in_segments == UINT64_C(1000));
@@ -325,6 +330,7 @@ static int test_network_remains_independent_from_tcp(void)
     CHECK(snapshot.network.valid);
     CHECK(snapshot.network.rx_bytes == UINT64_C(42));
     CHECK(snapshot.network.tx_dropped == UINT64_C(49));
+    CHECK(snapshot.network.rx_missed_errors == UINT64_C(50));
     CHECK(!snapshot.tcp.snmp_valid);
     CHECK(!snapshot.tcp.ext_valid);
 
