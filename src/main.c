@@ -73,15 +73,33 @@ static int print_delivery_snapshot(void)
         return -1;
     }
 
-    written = printf("{\"ok\":true,\"network\":");
+    written = printf("{\"ok\":true,\"cpu\":");
     if (written < 0) {
+        return -1;
+    }
+    if (snapshot.cpu.valid) {
+        written = printf(
+            "{\"total_ticks\":%llu,\"idle_ticks\":%llu,"
+            "\"iowait_ticks\":%llu,\"irq_ticks\":%llu,"
+            "\"softirq_ticks\":%llu,\"steal_ticks\":%llu}",
+            (unsigned long long)snapshot.cpu.total_ticks,
+            (unsigned long long)snapshot.cpu.idle_ticks,
+            (unsigned long long)snapshot.cpu.iowait_ticks,
+            (unsigned long long)snapshot.cpu.irq_ticks,
+            (unsigned long long)snapshot.cpu.softirq_ticks,
+            (unsigned long long)snapshot.cpu.steal_ticks);
+    } else {
+        written = printf("null");
+    }
+    if (written < 0 || printf(",\"network\":") < 0) {
         return -1;
     }
     if (snapshot.network.valid && safe_json_interface(snapshot.network.interface)) {
         written = printf(
             "{\"interface\":\"%s\",\"rx_bytes\":%llu,\"tx_bytes\":%llu,"
             "\"rx_packets\":%llu,\"tx_packets\":%llu,\"rx_errors\":%llu,"
-            "\"tx_errors\":%llu,\"rx_dropped\":%llu,\"tx_dropped\":%llu}",
+            "\"tx_errors\":%llu,\"rx_dropped\":%llu,\"tx_dropped\":%llu,"
+            "\"rx_missed_errors\":%llu}",
             snapshot.network.interface, (unsigned long long)snapshot.network.rx_bytes,
             (unsigned long long)snapshot.network.tx_bytes,
             (unsigned long long)snapshot.network.rx_packets,
@@ -89,7 +107,8 @@ static int print_delivery_snapshot(void)
             (unsigned long long)snapshot.network.rx_errors,
             (unsigned long long)snapshot.network.tx_errors,
             (unsigned long long)snapshot.network.rx_dropped,
-            (unsigned long long)snapshot.network.tx_dropped);
+            (unsigned long long)snapshot.network.tx_dropped,
+            (unsigned long long)snapshot.network.rx_missed_errors);
     } else {
         written = printf("null");
     }
