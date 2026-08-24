@@ -27,6 +27,10 @@ struct statd_host_cpu_snapshot {
     bool valid;
     uint64_t total_ticks;
     uint64_t idle_ticks;
+    uint64_t iowait_ticks;
+    uint64_t irq_ticks;
+    uint64_t softirq_ticks;
+    uint64_t steal_ticks;
 };
 
 struct statd_host_storage_snapshot {
@@ -46,6 +50,7 @@ struct statd_host_network_snapshot {
     uint64_t tx_errors;
     uint64_t rx_dropped;
     uint64_t tx_dropped;
+    uint64_t rx_missed_errors;
 };
 
 struct statd_host_tcp_snapshot {
