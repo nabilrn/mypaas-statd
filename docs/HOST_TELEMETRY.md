@@ -57,7 +57,11 @@ The daemon reads the aggregate `cpu` line from `/proc/stat` and exports cumulati
 The exported counters are:
 
 - `total_ticks`: sum of user, nice, system, idle, iowait, irq, softirq, and steal counters;
-- `idle_ticks`: idle + iowait.
+- `idle_ticks`: idle + iowait;
+- `iowait_ticks`;
+- `irq_ticks`;
+- `softirq_ticks`;
+- `steal_ticks`.
 
 Guest and guest_nice are not added separately because Linux already accounts them inside user/nice. Tick frequency does not need to be known for utilization ratios.
 
@@ -69,7 +73,7 @@ delta_idle  = idle_ticks_2 - idle_ticks_1
 cpu_usage   = (delta_total - delta_idle) / delta_total * 100
 ```
 
-If counters decrease, `delta_total` is zero, or the baseline is otherwise invalid, the consumer must reset its baseline and wait for the next sample rather than emitting a negative or fabricated percentage.
+If counters decrease, `delta_total` is zero, or the baseline is otherwise invalid, the consumer must reset its baseline and wait for the next sample rather than emitting a negative or fabricated percentage. IRQ/softirq deltas are kept separately so delivery diagnosis can detect kernel network-processing work hidden by low application CPU.
 
 ## Storage
 
@@ -100,7 +104,10 @@ After selecting the interface, statd reads cumulative counters from `/sys/class/
 - `rx_bytes`, `tx_bytes`;
 - `rx_packets`, `tx_packets`;
 - `rx_errors`, `tx_errors`;
-- `rx_dropped`, `tx_dropped`.
+- `rx_dropped`, `tx_dropped`;
+- `rx_missed_errors`.
+
+`rx_missed_errors` is also collected because Linux documents it as packets missed by the host, commonly indicating that the host/interface could not keep up with receive packet rate.
 
 These are Linux interface statistics, not application throughput. Byte and packet rates are derived from successive samples. A rise in error/drop counters during the exact load window is evidence of a local interface/host-side delivery problem; absence of such a rise does not prove that the external network path is healthy.
 
@@ -160,8 +167,11 @@ The receive/send buffer error counters are particularly useful when a UDP-based 
 Use deltas over the same load window. Examples of evidence, not automatic verdicts:
 
 ```text
-interface drops/errors increase
+interface drops/errors/rx_missed_errors increase
     -> local interface/host-side packet delivery pressure is plausible
+
+softirq delta consumes a large share of total CPU delta while user CPU stays low
+    -> kernel network processing may be consuming a CPU path even when app CPU is low
 
 ListenOverflows/ListenDrops increase
     -> local TCP listener accept queue pressure is proven
