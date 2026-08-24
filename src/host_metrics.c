@@ -140,6 +140,10 @@ static bool sample_cpu(const char *path, struct statd_host_cpu_snapshot *out)
     out->valid = true;
     out->total_ticks = total;
     out->idle_ticks = idle_total;
+    out->iowait_ticks = values[4];
+    out->irq_ticks = values[5];
+    out->softirq_ticks = values[6];
+    out->steal_ticks = values[7];
     return true;
 }
 
@@ -311,7 +315,9 @@ static bool sample_network(const char *route_path, const char *net_class_path,
         !read_interface_counter(net_class_path, interface, "rx_errors", &out->rx_errors) ||
         !read_interface_counter(net_class_path, interface, "tx_errors", &out->tx_errors) ||
         !read_interface_counter(net_class_path, interface, "rx_dropped", &out->rx_dropped) ||
-        !read_interface_counter(net_class_path, interface, "tx_dropped", &out->tx_dropped)) {
+        !read_interface_counter(net_class_path, interface, "tx_dropped", &out->tx_dropped) ||
+        !read_interface_counter(net_class_path, interface, "rx_missed_errors",
+                                &out->rx_missed_errors)) {
         return false;
     }
 
