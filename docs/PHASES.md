@@ -99,32 +99,39 @@ The published v0.1.0 source is the accepted release baseline for future compatib
 
 **Status:** active.
 
-Goal: add the smallest mature host-level telemetry contract needed by the MyPaaS workspace dashboard without turning statd into a general monitoring agent.
+Goal: add the smallest mature host-level telemetry contract needed by the MyPaaS workspace dashboard and delivery diagnosis without turning statd into a general monitoring agent.
 
 Completed Phase 6 slices:
 - root-filesystem total and available bytes using `statvfs(3)`;
 - IPv4 default-route interface selection from bounded `/proc/net/route` rows;
-- cumulative RX/TX byte counters from `/sys/class/net/<iface>/statistics/`;
-- independent validity for storage and network sections;
-- deterministic tests for route selection, counters, partial availability, invalid input, and bounds;
+- cumulative RX/TX bytes, packets, errors, drops, and `rx_missed_errors` from `/sys/class/net/<iface>/statistics/`;
+- cumulative aggregate CPU counters with iowait, IRQ, softirq, and steal breakdown for delivery correlation;
+- host TCP counters from `/proc/net/snmp` plus listener/retransmit/abort evidence from `TcpExt` in `/proc/net/netstat`;
+- host UDP datagram/error/socket-buffer counters from `/proc/net/snmp` for UDP/QUIC-path diagnosis;
+- bounded paired-header/value parsing that requests explicit keys and never fabricates missing counters;
+- independent validity for storage, network, TCP SNMP, TCP extended, and UDP sources;
+- deterministic tests for route selection, counters, partial availability, invalid input, bounds, signed unrelated fields, and missing required keys;
 - periodic host sampling in the existing daemon sample loop;
 - additive protocol-v1 `host_snapshot` delivery from the latest in-memory sample;
-- deterministic IPC tests for unavailable, complete, partial, and unsafe-interface snapshots.
+- deterministic IPC tests for unavailable, complete, partial, and unsafe-interface snapshots;
+- read-only `mypaas-statd --delivery-snapshot` JSON output for before/after load-window correlation without changing protocol v1.
 
 Remaining Phase 6 work:
-- MyPaaS Go control-plane integration with staged compatibility for v0.1 daemons;
+- target-host correlation of delivery snapshots against one known failing workload before making any kernel/network performance claim;
+- MyPaaS Go control-plane integration with staged compatibility for v0.1 daemons where richer host delivery telemetry proves useful;
 - dashboard consumption and real rolling resource visualization;
 - v0.2 release preparation after end-to-end validation.
 
 Explicitly out of scope for Phase 6:
 - eBPF;
 - packet capture;
-- traffic control;
+- traffic control or automatic sysctl tuning;
 - netlink-based per-container accounting;
 - Docker/Podman API calls from statd;
 - per-project network usage;
 - filesystem/volume scanning;
 - time-series persistence;
+- automatic remediation/autoscaling decisions;
 - a general host monitoring agent.
 
 Host-reader semantics are documented in `docs/HOST_TELEMETRY.md`; the additive wire contract is documented in `docs/IPC_PROTOCOL.md`.
